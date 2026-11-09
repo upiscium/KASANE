@@ -1,0 +1,116 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agentknowledgevault.dev/schemas/v0.1/knowledge-signal.schema.json",
+  "title": "KASANE Knowledge Signal v0.1",
+  "description": "Trust evidence an agent attaches to existing knowledge (see #40). The signalling agent's identity comes from server configuration.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "knowledge_ref",
+    "kind"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "0.1"
+    },
+    "knowledge_ref": {
+      "type": "string",
+      "minLength": 12,
+      "maxLength": 2048,
+      "pattern": "^vault://(global|project|research|private)/"
+    },
+    "kind": {
+      "enum": [
+        "corroboration",
+        "verification",
+        "outcome"
+      ]
+    },
+    "verification": {
+      "enum": [
+        "passed",
+        "failed",
+        "rejected"
+      ]
+    },
+    "outcome": {
+      "enum": [
+        "success",
+        "failure"
+      ]
+    },
+    "note": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2000
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "verification"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "verification",
+          "note"
+        ],
+        "not": {
+          "required": [
+            "outcome"
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "outcome"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "outcome",
+          "note"
+        ],
+        "not": {
+          "required": [
+            "verification"
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "corroboration"
+          }
+        }
+      },
+      "then": {
+        "not": {
+          "anyOf": [
+            {
+              "required": [
+                "verification"
+              ]
+            },
+            {
+              "required": [
+                "outcome"
+              ]
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

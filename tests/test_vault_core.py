@@ -549,7 +549,7 @@ def test_reopen_preserves_state_and_history(
 def test_schema_version_and_initialization_are_deterministic(
     repository: VaultRepository,
 ) -> None:
-    assert repository.current_schema_version() == CURRENT_SCHEMA_VERSION == 2
+    assert repository.current_schema_version() == CURRENT_SCHEMA_VERSION == 3
     VaultRepository(repository.database_path)
     connection = sqlite3.connect(repository.database_path)
     try:
@@ -561,7 +561,43 @@ def test_schema_version_and_initialization_are_deterministic(
     assert rows == [
         (1, "vault_core_v0_1"),
         (2, "append_only_and_verification_outcomes"),
+        (3, "trust_signal_events"),
     ]
+
+
+def test_v2_vault_migrates_to_v3_preserving_events(tmp_path: Path) -> None:
+    import kasane.vault.repository as repository_module
+    from kasane.vault import migrations
+
+    path = tmp_path / "v2.db"
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(migrations, "MIGRATIONS", migrations.MIGRATIONS[:2])
+        patch.setattr(repository_module, "CURRENT_SCHEMA_VERSION", 2)
+        legacy = VaultRepository(path)
+        legacy.create_candidate(
+            KnowledgeDraft(
+                knowledge_ref="vault://global/migration/keep",
+                knowledge_type="guidance",
+                title="Keep",
+                body="Events survive the v3 rebuild.",
+            ),
+            actor="agent:a",
+        )
+    upgraded = VaultRepository(path)
+    assert upgraded.current_schema_version() == 3
+    ref = "vault://global/migration/keep"
+    assert [event.event_type for event in upgraded.list_events(ref)] == [
+        EventType.CREATED
+    ]
+    upgraded.record_signal_event(
+        ref, EventType.CORROBORATED, expected_revision=1, actor="agent:b"
+    )
+    connection = sqlite3.connect(path)
+    try:
+        with pytest.raises(sqlite3.IntegrityError):
+            connection.execute("DELETE FROM knowledge_events")
+    finally:
+        connection.close()
 
 
 @pytest.mark.parametrize(
@@ -631,9 +667,9 @@ def test_json_metadata_round_trips_and_is_stored_canonically(
 
 
 def test_default_runtime_path_uses_configured_or_xdg_state() -> None:
-    assert default_database_path(
-        {"AGENT_KNOWLEDGE_VAULT_DATA_ROOT": "/srv/akv"}
-    ) == Path("/srv/akv/vault.db")
+    assert default_database_path({"KASANE_DATA_ROOT": "/srv/kasane"}) == Path(
+        "/srv/kasane/vault.db"
+    )
     assert default_database_path({"XDG_STATE_HOME": "/state"}) == Path(
-        "/state/agent-knowledge-vault/vault.db"
+        "/state/kasane/vault.db"
     )

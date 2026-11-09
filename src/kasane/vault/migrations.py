@@ -5,7 +5,7 @@ from __future__ import annotations
 import sqlite3
 from dataclasses import dataclass
 
-CURRENT_SCHEMA_VERSION = 2
+CURRENT_SCHEMA_VERSION = 3
 
 
 @dataclass(frozen=True)
@@ -20,10 +20,70 @@ _EVENT_VALUES_V1 = (
     "'CREATED','UPDATED','VERIFIED','PROMOTED','SUPERSEDED','DEPRECATED',"
     "'ARCHIVED','REVALIDATION_REQUESTED'"
 )
-_EVENT_VALUES = (
+_EVENT_VALUES_V2 = (
     "'CREATED','UPDATED','VERIFICATION_RECORDED','VERIFIED','PROMOTED',"
     "'SUPERSEDED','DEPRECATED','ARCHIVED','REVALIDATION_REQUESTED'"
 )
+_EVENT_VALUES_V3 = _EVENT_VALUES_V2 + ",'CORROBORATED','OUTCOME_REPORTED'"
+
+
+def _append_only_event_table(event_values: str, *, copy_from: str) -> tuple[str, ...]:
+    """Recreate the append-only event table with a new event-type domain."""
+
+    return (
+        f"""
+        CREATE TABLE knowledge_events (
+            event_sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+            event_id TEXT NOT NULL UNIQUE,
+            knowledge_ref TEXT NOT NULL,
+            revision INTEGER NOT NULL CHECK (revision >= 1),
+            actor TEXT NOT NULL,
+            timestamp TEXT NOT NULL,
+            event_type TEXT NOT NULL CHECK (event_type IN ({event_values})),
+            metadata_json TEXT NOT NULL,
+            FOREIGN KEY (knowledge_ref) REFERENCES knowledge_records(knowledge_ref)
+                ON UPDATE RESTRICT ON DELETE RESTRICT
+        )
+        """,
+        f"""
+        INSERT INTO knowledge_events(
+            event_sequence, event_id, knowledge_ref, revision, actor,
+            timestamp, event_type, metadata_json
+        )
+        SELECT event_sequence, event_id, knowledge_ref, revision, actor,
+               timestamp, event_type, metadata_json
+        FROM {copy_from}
+        ORDER BY event_sequence
+        """,
+        f"DROP TABLE {copy_from}",
+        "CREATE INDEX knowledge_events_history_idx ON knowledge_events(knowledge_ref, event_sequence)",
+        """
+        CREATE TRIGGER knowledge_events_no_replace
+        BEFORE INSERT ON knowledge_events
+        WHEN EXISTS (
+            SELECT 1 FROM knowledge_events
+            WHERE event_id = NEW.event_id
+               OR event_sequence = NEW.event_sequence
+        )
+        BEGIN
+            SELECT RAISE(ABORT, 'knowledge_events is append-only');
+        END
+        """,
+        """
+        CREATE TRIGGER knowledge_events_no_update
+        BEFORE UPDATE ON knowledge_events
+        BEGIN
+            SELECT RAISE(ABORT, 'knowledge_events is append-only');
+        END
+        """,
+        """
+        CREATE TRIGGER knowledge_events_no_delete
+        BEFORE DELETE ON knowledge_events
+        BEGIN
+            SELECT RAISE(ABORT, 'knowledge_events is append-only');
+        END
+        """,
+    )
 
 
 MIGRATIONS = (
@@ -110,7 +170,7 @@ MIGRATIONS = (
                 revision INTEGER NOT NULL CHECK (revision >= 1),
                 actor TEXT NOT NULL,
                 timestamp TEXT NOT NULL,
-                event_type TEXT NOT NULL CHECK (event_type IN ({_EVENT_VALUES})),
+                event_type TEXT NOT NULL CHECK (event_type IN ({_EVENT_VALUES_V2})),
                 metadata_json TEXT NOT NULL,
                 FOREIGN KEY (knowledge_ref) REFERENCES knowledge_records(knowledge_ref)
                     ON UPDATE RESTRICT ON DELETE RESTRICT
@@ -154,6 +214,20 @@ MIGRATIONS = (
                 SELECT RAISE(ABORT, 'knowledge_events is append-only');
             END
             """,
+        ),
+    ),
+    Migration(
+        version=3,
+        name="trust_signal_events",
+        statements=(
+            "DROP TRIGGER knowledge_events_no_replace",
+            "DROP TRIGGER knowledge_events_no_update",
+            "DROP TRIGGER knowledge_events_no_delete",
+            "DROP INDEX knowledge_events_history_idx",
+            "ALTER TABLE knowledge_events RENAME TO knowledge_events_v2",
+            *_append_only_event_table(
+                _EVENT_VALUES_V3, copy_from="knowledge_events_v2"
+            ),
         ),
     ),
 )

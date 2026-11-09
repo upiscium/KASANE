@@ -48,6 +48,16 @@ verification_outcome, stale_after, created_at, updated_at, revision
 """
 
 
+SIGNAL_EVENT_TYPES = frozenset(
+    {
+        EventType.SUPERSEDED,
+        EventType.REVALIDATION_REQUESTED,
+        EventType.CORROBORATED,
+        EventType.OUTCOME_REPORTED,
+    }
+)
+
+
 class VaultRepository:
     """Repository boundary; public identities never expose SQLite keys."""
 
@@ -361,7 +371,7 @@ class VaultRepository:
         actor: str,
         metadata: JsonValue = None,
     ) -> KnowledgeEvent:
-        if event_type not in {EventType.SUPERSEDED, EventType.REVALIDATION_REQUESTED}:
+        if event_type not in SIGNAL_EVENT_TYPES:
             raise ValueError("only non-lifecycle signal events are accepted")
         parse_knowledge_ref(knowledge_ref)
         timestamp = self._clock()

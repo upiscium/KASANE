@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping
-from importlib import resources
 from pathlib import Path
 from typing import Any, Protocol
 
 import mcp_types as types
 from mcp.server import Server, ServerRequestContext
+
+from kasane.contracts import default_schema_dir, load_schema
 
 TOOL_NAME = "kasane_retrieve"
 TOOL_DESCRIPTION = (
@@ -25,15 +26,6 @@ class RetrievalBackend(Protocol):
     def retrieve(self, request_value: Mapping[str, Any]) -> Any: ...
 
 
-def default_schema_dir() -> Path:
-    """Locate the SSOT schemas: bundled in the wheel, else the source checkout."""
-
-    bundled = Path(str(resources.files("kasane"))) / "schemas"
-    if (bundled / REQUEST_SCHEMA).is_file():
-        return bundled
-    return Path(__file__).resolve().parents[3] / "schemas"
-
-
 def load_request_schema(schema_dir: Path | None = None) -> dict[str, Any]:
     """Return the request schema (SSOT) as the tool input schema.
 
@@ -41,8 +33,7 @@ def load_request_schema(schema_dir: Path | None = None) -> dict[str, Any]:
     not the MCP tool; every field definition is passed through unchanged.
     """
 
-    raw = ((schema_dir or default_schema_dir()) / REQUEST_SCHEMA).read_text("utf-8")
-    schema: dict[str, Any] = json.loads(raw)
+    schema = load_schema(REQUEST_SCHEMA, schema_dir)
     schema.pop("$id", None)
     return schema
 
