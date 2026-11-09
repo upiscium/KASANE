@@ -37,7 +37,11 @@ Thresholds live in `TrustPolicyConfig` and are not part of the wire contract.
 
 ## Contracts
 
-- `schemas/knowledge-proposal.schema.json` — what an agent submits.
+- `schemas/knowledge-proposal.schema.json` — what an agent submits. `knowledge_type`
+  is one of `procedure`, `design`, `guidance`, `pitfall`, `constraint`. Body is
+  capped at 4,000 characters / 12,000 UTF-8 bytes and grows only if operation
+  shows the cap is too tight. Situation conditions are not accepted until #42;
+  agents state the situation in the body.
 - `schemas/knowledge-signal.schema.json` — `corroboration`, `verification`
   (candidates only), or `outcome`.
 

@@ -143,7 +143,9 @@ def test_failures_archive_candidates(service: TrustService) -> None:
         {"knowledge_ref": "https://example.com/x"},
         {"title": ""},
         {"unexpected": True},
-        {"knowledge_type": "Bad Type"},
+        {"knowledge_type": "howto"},
+        {"applies_when": {"language": "python"}},
+        {"body": "x" * 4001},
     ],
 )
 def test_contract_violations_rejected(

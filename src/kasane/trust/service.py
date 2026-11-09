@@ -34,7 +34,7 @@ from .policy import (
 
 PROPOSAL_SCHEMA = "knowledge-proposal.schema.json"
 SIGNAL_SCHEMA = "knowledge-signal.schema.json"
-DEFAULT_MAX_BODY_BYTES = 24_000
+DEFAULT_MAX_BODY_BYTES = 12_000
 _MAX_POLICY_STEPS = 4
 
 
@@ -111,8 +111,6 @@ class TrustService:
             title=str(proposal["title"]),
             body=body,
             tags=list(proposal.get("tags", [])),
-            applies_when=proposal.get("applies_when", {}),
-            counterconditions=proposal.get("counterconditions", []),
             sources=list(proposal["sources"]),
             provenance={"origin": "agent", "agent": agent.metadata()["agent"]},
             generated={"by": "agent"},
