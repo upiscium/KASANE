@@ -102,12 +102,48 @@ def test_approve_requires_t2(service: TrustService) -> None:
         service.approve(REF)
 
 
-def test_reject_archives_with_reason(service: TrustService) -> None:
+def _to_t2(service: TrustService) -> None:
     service.propose(proposal(), AUTHOR)
+    service.signal(signal("verification", verification="passed", note="ok"), agent("v"))
+    service.signal(signal("outcome", outcome="success", note="ok"), agent("u1"))
+    service.signal(signal("outcome", outcome="success", note="ok"), agent("u2"))
+
+
+def test_reject_only_applies_to_approval_queue(service: TrustService) -> None:
+    service.propose(proposal(), AUTHOR)
+    with pytest.raises(TrustRejectedError, match="approval queue"):
+        service.reject(REF, reason="not now")
+    assert service.assess(REF).record.status is KnowledgeStatus.CANDIDATE
+
+
+def test_reject_archives_t2_with_reason(tmp_path: Path) -> None:
+    service = TrustService(VaultRepository(tmp_path / "vault.db"))
+    _to_t2(service)
+    with pytest.raises(TrustRejectedError, match="reason"):
+        service.reject(REF, reason=" ")
     result = service.reject(REF, reason="duplicates existing guidance")
     assert result.record.status is KnowledgeStatus.ARCHIVED
+    assert service.repository.list_events(REF)[-1].actor == "operator"
     with pytest.raises(TrustRejectedError):
         service.signal(signal("corroboration"), agent("late"))
+
+
+def test_reconcile_applies_policy_left_behind(service: TrustService) -> None:
+    service.propose(proposal(), AUTHOR)
+    record = service.repository.get_knowledge(REF)
+    for session in ("a", "b"):  # simulate signals recorded before a crash
+        record = service.repository.get_knowledge(REF)
+        service.repository.record_signal_event(
+            REF,
+            EventType.CORROBORATED,
+            expected_revision=record.revision,
+            actor="opencode",
+            metadata=agent(session).metadata(),
+        )
+    assert service.assess(REF).record.status is KnowledgeStatus.CANDIDATE
+    assert service.reconcile() == [REF]
+    assert service.assess(REF).record.status is KnowledgeStatus.VERIFIED
+    assert service.reconcile() == []  # idempotent
 
 
 def test_canonical_failures_revalidate_then_deprecate(service: TrustService) -> None:

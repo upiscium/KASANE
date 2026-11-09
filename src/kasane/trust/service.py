@@ -196,19 +196,41 @@ class TrustService:
         return self.assess(knowledge_ref)
 
     def reject(self, knowledge_ref: str, *, reason: str) -> TrustResult:
+        """Decline a T2 item in the approval queue. Not an emergency tool."""
+
         if not reason.strip():
             raise TrustRejectedError("reject requires a reason")
-        record = self._get(knowledge_ref)
-        if record.status not in (KnowledgeStatus.CANDIDATE, KnowledgeStatus.VERIFIED):
-            raise TrustRejectedError(f"cannot reject {record.status.value} knowledge")
+        current = self.assess(knowledge_ref)
+        if not current.assessment.approval_eligible:
+            raise TrustRejectedError(
+                f"{knowledge_ref} is not in the approval queue (T2 required); "
+                "use quarantine for emergencies"
+            )
         self.repository.transition_lifecycle(
             knowledge_ref,
             KnowledgeStatus.ARCHIVED,
-            expected_revision=record.revision,
+            expected_revision=current.record.revision,
             actor=OPERATOR_ACTOR,
             event_metadata={"decision": "reject", "reason": reason},
         )
         return self.assess(knowledge_ref)
+
+    def reconcile(self) -> list[str]:
+        """Re-apply the policy to every live record; return refs that changed.
+
+        Signal recording and policy transitions are separate transactions, so
+        a crash in between can leave a record behind its policy state. The
+        policy is deterministic, so re-running it is always safe.
+        """
+
+        changed: list[str] = []
+        for record in self.repository.list_knowledge():
+            if record.status in (KnowledgeStatus.DEPRECATED, KnowledgeStatus.ARCHIVED):
+                continue
+            self._apply_policy(record.knowledge_ref)
+            if self._get(record.knowledge_ref).revision != record.revision:
+                changed.append(record.knowledge_ref)
+        return changed
 
     # Internals ---------------------------------------------------------
 
