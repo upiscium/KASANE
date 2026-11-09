@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import logging
 import sqlite3
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from kasane.contracts import validate_contract
@@ -82,6 +83,9 @@ class AgentContext:
 
     def metadata(self, **extra: JsonValue) -> dict[str, JsonValue]:
         return {"agent": {"session": self.session, "model": self.model}, **extra}
+
+
+_LOG = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -210,7 +214,12 @@ class TrustService:
         try:
             self._apply_policy(ref)
         except (VaultError, sqlite3.Error):
-            pass
+            _LOG.warning(
+                "policy step for %s failed after its signal committed; "
+                "kasane-admin reconcile will retry",
+                ref,
+                exc_info=True,
+            )
         return self.assess(ref)
 
     def _record_signal(
@@ -361,7 +370,8 @@ class TrustService:
     def block(self, actor: str, *, reason: str) -> None:
         """Refuse all future writes from one writer identity."""
 
-        if not actor.strip() or actor in RESERVED_ACTORS:
+        if actor != actor.strip() or not actor or actor in RESERVED_ACTORS:
+            # Whitespace would make a block that never matches any writer.
             raise TrustRejectedError(f"cannot block {actor!r}")
         self._log("BLOCK_ACTOR", reason, target=actor)
 
@@ -377,6 +387,20 @@ class TrustService:
         refs: Sequence[str] = (),
         apply: bool = False,
     ) -> QuarantinePlan:
+        with _refusing():
+            return self._quarantine_unchecked(
+                reason=reason, actor=actor, since=since, refs=refs, apply=apply
+            )
+
+    def _quarantine_unchecked(
+        self,
+        *,
+        reason: str,
+        actor: str | None,
+        since: str | None,
+        refs: Sequence[str],
+        apply: bool,
+    ) -> QuarantinePlan:
         """Archive knowledge authored by ``actor`` (since ``since``) and ``refs``.
 
         Also reports live knowledge the actor vouched for (corroborations,
@@ -386,6 +410,8 @@ class TrustService:
 
         if not reason.strip():
             raise TrustRejectedError("quarantine requires a reason")
+        for ref in refs:
+            parse_knowledge_ref(ref)  # malformed refs refused before any work
         if actor is None and not refs:
             raise TrustRejectedError("quarantine needs --actor or at least one --ref")
         cutoff = None if since is None else _parse_since(since)
@@ -407,30 +433,50 @@ class TrustService:
         archived: list[str] = []
         failed: list[str] = []
         if apply:
-            for ref in targets:
-                try:
-                    self._archive_now(ref, reason)
-                    archived.append(ref)
-                except (StaleRevisionError, TrustRejectedError, VaultError):
-                    failed.append(ref)
-            self._log(
-                "QUARANTINE",
-                reason,
-                target=actor,
-                details={
-                    "since": since,
-                    "refs": _json_list(refs),
-                    "archived": _json_list(archived),
-                    "failed": _json_list(failed),
-                    "vouched": _json_list(vouched),
-                },
-            )
+            try:
+                for ref in targets:
+                    try:
+                        self._archive_now(ref, reason)
+                        archived.append(ref)
+                    except (StaleRevisionError, TrustRejectedError, VaultError):
+                        failed.append(ref)
+            finally:
+                # Logged even if the sweep aborts (e.g. database locked), so
+                # what was archived is always on record.
+                done = set(archived) | set(failed)
+                failed.extend([ref for ref in targets if ref not in done])
+                self._log_quarantine(
+                    reason, actor, since, refs, archived, failed, vouched
+                )
         return QuarantinePlan(
             targets=targets,
             vouched=vouched,
             archived=archived,
             failed=failed,
             applied=apply,
+        )
+
+    def _log_quarantine(
+        self,
+        reason: str,
+        actor: str | None,
+        since: str | None,
+        refs: Sequence[str],
+        archived: list[str],
+        failed: list[str],
+        vouched: list[str],
+    ) -> None:
+        self._log(
+            "QUARANTINE",
+            reason,
+            target=actor,
+            details={
+                "since": since,
+                "refs": _json_list(refs),
+                "archived": _json_list(archived),
+                "failed": _json_list(failed),
+                "vouched": _json_list(vouched),
+            },
         )
 
     # Internals ---------------------------------------------------------
@@ -685,13 +731,22 @@ def _parse_since(value: str) -> datetime:
     return parsed
 
 
+def parse_since(value: str) -> datetime:
+    """Public for the admin CLI: an aware ISO 8601 cutoff or TrustRejectedError."""
+
+    return _parse_since(value)
+
+
 def _at_or_after(timestamp: str, cutoff: datetime | None) -> bool:
     if cutoff is None:
         return True
     try:
-        return datetime.fromisoformat(timestamp) >= cutoff
+        parsed = datetime.fromisoformat(timestamp)
     except ValueError:
         return True  # unparseable: err on the side of including it
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)  # never compare naive with aware
+    return parsed >= cutoff
 
 
 def _authored_by(events: Sequence[Any], actor: str, cutoff: datetime | None) -> bool:

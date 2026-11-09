@@ -478,10 +478,15 @@ class VaultRepository:
         *,
         actor: str | None = None,
         knowledge_ref: str | None = None,
-        since: str | None = None,
+        since: datetime | None = None,
         limit: int = 200,
     ) -> list[KnowledgeEvent]:
-        """Cross-record event query for audits, oldest first, bounded."""
+        """The newest ``limit`` matching events, returned oldest first.
+
+        Scans newest-first so large logs never hide recent events behind a
+        cap; ``since`` is compared as a parsed timestamp (naive values are
+        treated as UTC), never as a string.
+        """
 
         clauses: list[str] = []
         params: list[Any] = []
@@ -492,21 +497,26 @@ class VaultRepository:
             parse_knowledge_ref(knowledge_ref)
             clauses.append("knowledge_ref = ?")
             params.append(knowledge_ref)
-        if since is not None:
-            clauses.append("timestamp >= ?")
-            params.append(since)
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        wanted = max(1, limit)
+        selected: list[sqlite3.Row] = []
         with self._connection() as connection:
-            rows = connection.execute(
+            cursor = connection.execute(
                 f"""
                 SELECT event_id, knowledge_ref, revision, actor, timestamp, event_type,
                        metadata_json
                 FROM knowledge_events {where}
-                ORDER BY event_sequence
-                LIMIT ?
+                ORDER BY event_sequence DESC
                 """,
-                (*params, max(1, min(limit, 10_000))),
-            ).fetchall()
+                params,
+            )
+            for row in cursor:
+                if since is not None and not _at_or_after(row["timestamp"], since):
+                    continue
+                selected.append(row)
+                if len(selected) >= wanted:
+                    break
+        rows = list(reversed(selected))
         return [
             KnowledgeEvent(
                 event_id=row["event_id"],
@@ -708,3 +718,17 @@ class VaultRepository:
             updated_at=row["updated_at"],
             revision=row["revision"],
         )
+
+
+def _at_or_after(timestamp: str, cutoff: datetime) -> bool:
+    """Compare stored timestamps as instants; unparseable values are included."""
+
+    try:
+        parsed = datetime.fromisoformat(timestamp)
+    except ValueError:
+        return True
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    if cutoff.tzinfo is None:
+        cutoff = cutoff.replace(tzinfo=UTC)
+    return parsed >= cutoff

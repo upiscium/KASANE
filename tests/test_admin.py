@@ -33,6 +33,15 @@ def proposal(
     }
 
 
+def distinct(index: int) -> str:
+    """Body text that never trips the near-duplicate refusal."""
+
+    import hashlib
+
+    digest = hashlib.sha256(str(index).encode()).hexdigest()
+    return " ".join(digest[i : i + 8] for i in range(0, 48, 8))
+
+
 def signal(kind: str, ref: str = REF, **fields: Any) -> dict[str, Any]:
     return {"schema_version": "0.1", "knowledge_ref": ref, "kind": kind, **fields}
 
@@ -274,3 +283,115 @@ def test_cli_human_output_is_readable(
     assert admin_main(["--vault", str(vault), "queue"]) == 0
     out = capsys.readouterr().out
     assert "T2" in out and REF in out and "successes=2" in out
+
+
+# Regression tests for independent review findings on PR #46 -----------------
+
+
+def test_events_show_the_newest_and_filter_since_as_instants(
+    vault: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    now = {"value": "2026-01-01T00:00:00Z"}
+    repository = VaultRepository(vault, clock=lambda: now["value"])
+    service = TrustService(repository)
+    for index in range(30):
+        now["value"] = f"2026-01-01T00:00:{index:02d}Z"
+        service.propose(
+            proposal(
+                f"vault://project/kasane/bulk/item-{index:02d}",
+                distinct(index),
+            ),
+            agent(f"s{index}"),
+        )
+    newest = run(vault, "events", "--limit", "3", capsys=capsys)
+    assert [e["knowledge_ref"].rsplit("-", 1)[-1] for e in newest] == ["27", "28", "29"]
+    # Fraction-free cutoff must still include events at exactly that second.
+    since = run(vault, "events", "--since", "2026-01-01T00:00:28+00:00", capsys=capsys)
+    assert [e["knowledge_ref"].rsplit("-", 1)[-1] for e in since] == ["28", "29"]
+
+
+def test_naive_stored_timestamps_do_not_crash_since_filters(vault: Path) -> None:
+    repository = VaultRepository(vault, clock=lambda: "2026-05-01T00:00:00")
+    service = TrustService(repository)
+    service.propose(proposal(), agent("s", "rogue"))
+    cutoff = "2026-04-01T00:00:00+00:00"
+    assert service.quarantine(reason="x", actor="rogue", since=cutoff).targets == [REF]
+    from kasane.trust.service import parse_since
+
+    events = repository.search_events(since=parse_since(cutoff))
+    assert [e.knowledge_ref for e in events] == [REF]
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["events", "--since", "garbage"],
+        ["events", "--since", "2026-01-01T00:00:00"],
+        ["events", "--ref", "vault://project/onlyowner"],
+        ["quarantine", "--ref", "vault://project/onlyowner", "--reason", "x"],
+        ["approve", "vault://global/a b"],
+    ],
+)
+def test_bad_operator_input_is_a_message_not_a_traceback(
+    vault: Path,
+    service: TrustService,
+    capsys: pytest.CaptureFixture[str],
+    argv: list[str],
+) -> None:
+    with pytest.raises(SystemExit) as raised:
+        admin_main(["--vault", str(vault), *argv])
+    assert raised.value.code == 1
+    err = capsys.readouterr().err
+    assert err.startswith("kasane-admin: ")
+    assert "Traceback" not in err
+
+
+def test_quarantine_logs_even_when_the_sweep_aborts(
+    service: TrustService, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    refs = [f"vault://project/kasane/rogue/item-{i}" for i in range(3)]
+    for i, ref in enumerate(refs):
+        service.propose(
+            proposal(ref, distinct(100 + i)),
+            agent(f"r{i}", "rogue"),
+        )
+    original = service._archive_now
+    calls = {"n": 0}
+
+    def locked(ref: str, reason: str) -> None:
+        calls["n"] += 1
+        if calls["n"] == 2:
+            raise sqlite3.OperationalError("database is locked")
+        original(ref, reason)
+
+    monkeypatch.setattr(service, "_archive_now", locked)
+    with pytest.raises(sqlite3.OperationalError):  # the CLI reports it, exit 1
+        service.quarantine(reason="incident", actor="rogue", apply=True)
+    logged = service.repository.list_operator_actions()
+    assert [a.action for a in logged] == ["QUARANTINE"]
+    details = logged[0].details
+    assert isinstance(details, dict)
+    assert details["archived"] == [refs[0]]
+    assert details["failed"] == refs[1:]
+
+
+def test_block_target_with_whitespace_is_refused(service: TrustService) -> None:
+    for name in (" opencode", "opencode ", ""):
+        with pytest.raises(TrustRejectedError):
+            service.block(name, reason="x")
+
+
+def test_swallowed_policy_failure_is_logged(
+    service: TrustService,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    service.propose(proposal(), agent("author"))
+
+    def broken(ref: str) -> bool:
+        raise VaultError("policy step failed")
+
+    monkeypatch.setattr(service, "_apply_policy", broken)
+    with caplog.at_level("WARNING", logger="kasane.trust.service"):
+        service.signal(signal("corroboration"), agent("a"))
+    assert "reconcile will retry" in caplog.text

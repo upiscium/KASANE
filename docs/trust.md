@@ -88,6 +88,10 @@ Humans act only at the top tier and in emergencies. All commands take
 Emergency procedure: `freeze` → `block` the writer → `quarantine --actor` (dry
 run, then `--yes`) → review the vouched list (corroborations, verifications or
 successes by that writer still count toward other records' trust) → `unfreeze`.
+`block` matches the writer's configured `actor` name only. Identity is declared,
+not authenticated, so a writer that controls its own server configuration can
+return under another name: keep the Vault frozen until that configuration is
+fixed.
 
 Freeze, block and quarantine are recorded in an append-only `operator_actions`
 log (Vault schema v4). Gates are checked when a write starts, not inside its

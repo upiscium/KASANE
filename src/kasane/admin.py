@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import sqlite3
 import sys
 from collections.abc import Sequence
 from pathlib import Path
@@ -20,6 +21,8 @@ from kasane.trust import (
     TrustRejectedError,
     TrustService,
 )
+from kasane.trust.service import parse_since
+from kasane.vault.errors import VaultError
 from kasane.vault.models import KnowledgeStatus
 from kasane.vault.repository import VaultRepository
 
@@ -35,7 +38,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     try:
         payload = _dispatch(service, args)
-    except TrustRejectedError as exc:
+    except (TrustRejectedError, VaultError, ValueError, sqlite3.Error) as exc:
+        # Operator input errors and refusals: a message, never a traceback.
         parser.exit(1, f"kasane-admin: {exc}\n")
     _emit(payload, as_json=args.json)
     return 0
@@ -165,17 +169,11 @@ def _queue_item(service: TrustService, result: Any) -> dict[str, Any]:
 
 
 def _events(service: TrustService, args: argparse.Namespace) -> list[dict[str, Any]]:
-    from datetime import datetime
-
-    cutoff = None
-    if args.since is not None:
-        cutoff = datetime.fromisoformat(args.since)
-        if cutoff.tzinfo is None:
-            raise TrustRejectedError("--since must include a timezone")
+    cutoff = None if args.since is None else parse_since(args.since)
     events = service.repository.search_events(
-        actor=args.actor, knowledge_ref=args.ref, limit=10_000
+        actor=args.actor, knowledge_ref=args.ref, since=cutoff, limit=args.limit
     )
-    rows = [
+    return [
         {
             "timestamp": event.timestamp,
             "actor": event.actor,
@@ -184,9 +182,7 @@ def _events(service: TrustService, args: argparse.Namespace) -> list[dict[str, A
             "revision": event.revision,
         }
         for event in events
-        if cutoff is None or datetime.fromisoformat(event.timestamp) >= cutoff
     ]
-    return rows[-max(1, args.limit) :]
 
 
 def _excerpt(body: str) -> str:
