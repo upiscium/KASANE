@@ -30,6 +30,7 @@ packages = ["src/kasane"]
 
 [project.scripts]
 kasane-mcp = "kasane.mcp_server.__main__:main"
+kasane-admin = "kasane.admin:main"
 
 [tool.hatch.build.targets.wheel.force-include]
 "schemas" = "kasane/schemas"

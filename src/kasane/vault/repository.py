@@ -25,7 +25,9 @@ from .models import (
     KnowledgeEvent,
     KnowledgeRecord,
     KnowledgeStatus,
+    OperatorAction,
     VerificationOutcome,
+    WriteControls,
 )
 
 Clock = Callable[[], str]
@@ -406,6 +408,117 @@ class VaultRepository:
             for event in self.list_events(knowledge_ref)
             if event.event_id == event_id
         )
+
+    def record_operator_action(
+        self,
+        action: str,
+        *,
+        reason: str,
+        actor: str,
+        target: str | None = None,
+        details: JsonValue | None = None,
+    ) -> OperatorAction:
+        """Append an operator action (freeze, block, quarantine) to the log."""
+
+        timestamp = self._clock()
+        details_json = canonical_json(require_json(details or {}))
+        with self._transaction() as connection:
+            cursor = connection.execute(
+                """
+                INSERT INTO operator_actions(
+                    action, target, reason, details_json, actor, timestamp
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (action, target, reason, details_json, actor, timestamp),
+            )
+            sequence = int(cursor.lastrowid or 0)
+        return OperatorAction(
+            sequence, action, target, reason, parse_json(details_json), actor, timestamp
+        )
+
+    def list_operator_actions(self) -> list[OperatorAction]:
+        with self._connection() as connection:
+            rows = connection.execute(
+                """
+                SELECT sequence, action, target, reason, details_json, actor, timestamp
+                FROM operator_actions ORDER BY sequence
+                """
+            ).fetchall()
+        return [
+            OperatorAction(
+                row["sequence"],
+                row["action"],
+                row["target"],
+                row["reason"],
+                parse_json(row["details_json"]),
+                row["actor"],
+                row["timestamp"],
+            )
+            for row in rows
+        ]
+
+    def write_controls(self) -> WriteControls:
+        """Current freeze flag and blocked actors, folded from the action log."""
+
+        frozen = False
+        blocked: set[str] = set()
+        for action in self.list_operator_actions():
+            if action.action == "FREEZE":
+                frozen = True
+            elif action.action == "UNFREEZE":
+                frozen = False
+            elif action.action == "BLOCK_ACTOR" and action.target:
+                blocked.add(action.target)
+            elif action.action == "UNBLOCK_ACTOR" and action.target:
+                blocked.discard(action.target)
+        return WriteControls(frozen=frozen, blocked_actors=frozenset(blocked))
+
+    def search_events(
+        self,
+        *,
+        actor: str | None = None,
+        knowledge_ref: str | None = None,
+        since: str | None = None,
+        limit: int = 200,
+    ) -> list[KnowledgeEvent]:
+        """Cross-record event query for audits, oldest first, bounded."""
+
+        clauses: list[str] = []
+        params: list[Any] = []
+        if actor is not None:
+            clauses.append("actor = ?")
+            params.append(actor)
+        if knowledge_ref is not None:
+            parse_knowledge_ref(knowledge_ref)
+            clauses.append("knowledge_ref = ?")
+            params.append(knowledge_ref)
+        if since is not None:
+            clauses.append("timestamp >= ?")
+            params.append(since)
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        with self._connection() as connection:
+            rows = connection.execute(
+                f"""
+                SELECT event_id, knowledge_ref, revision, actor, timestamp, event_type,
+                       metadata_json
+                FROM knowledge_events {where}
+                ORDER BY event_sequence
+                LIMIT ?
+                """,
+                (*params, max(1, min(limit, 10_000))),
+            ).fetchall()
+        return [
+            KnowledgeEvent(
+                event_id=row["event_id"],
+                knowledge_ref=row["knowledge_ref"],
+                revision=row["revision"],
+                actor=row["actor"],
+                timestamp=row["timestamp"],
+                event_type=EventType(row["event_type"]),
+                metadata=parse_json(row["metadata_json"]),
+            )
+            for row in rows
+        ]
 
     def list_events(self, knowledge_ref: str) -> list[KnowledgeEvent]:
         parse_knowledge_ref(knowledge_ref)

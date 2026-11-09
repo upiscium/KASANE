@@ -63,8 +63,45 @@ title, tags and body prefix) to any live knowledge is ≥ 0.5 is refused with th
 matching refs, so the agent corroborates instead. Retired (deprecated/archived)
 knowledge never blocks, and only knowledge inside the writer's scopes is
 compared or disclosed. The check is advisory, not transactional: two concurrent
-near-duplicate proposals can both be created. The threshold is tentative: paraphrases measured 0.58
+near-duplicate proposals can both be created. Because out-of-scope knowledge
+is never disclosed, a writer scoped to `project/a` can create a near-duplicate of
+`project/b` knowledge. The threshold is tentative: paraphrases measured 0.58
 (Japanese) and 0.78 (English); same-topic but different advice measured 0.27.
+
+## Operator tools (`kasane-admin`)
+
+Humans act only at the top tier and in emergencies. All commands take
+`--vault` (or `KASANE_VAULT_PATH`) and `--json`.
+
+| Command | Effect |
+| --- | --- |
+| `status` | Write gates, knowledge counts by status, approval queue size |
+| `queue` | T2 items with counts, contributing writers, and an excerpt |
+| `approve REF [--note]` | T2 → `canonical` (`PROMOTED`, `actor=operator`) |
+| `reject REF --reason` | T2 → `archived` (queue items only) |
+| `events [--actor] [--ref] [--since] [--limit]` | Audit the event log |
+| `reconcile` | Re-apply the policy everywhere; lists changed and skipped refs |
+| `freeze` / `unfreeze --reason` | Refuse / allow **all** agent writes |
+| `block` / `unblock WRITER --reason` | Refuse / allow one writer identity |
+| `quarantine (--actor W [--since T] \| --ref R…) --reason [--yes]` | Archive knowledge whose current content W authored (canonical goes via deprecated) and the given refs; lists live knowledge W vouched for, for review. Dry run unless `--yes` |
+
+Emergency procedure: `freeze` → `block` the writer → `quarantine --actor` (dry
+run, then `--yes`) → review the vouched list (corroborations, verifications or
+successes by that writer still count toward other records' trust) → `unfreeze`.
+
+Freeze, block and quarantine are recorded in an append-only `operator_actions`
+log (Vault schema v4). Gates are checked when a write starts, not inside its
+transaction, so a write already in flight when `freeze` lands may still commit.
+Operator actions (approve, reject, quarantine, reconcile) are allowed while
+frozen.
+
+## What not to store
+
+`private/<scope>` only *labels* restricted-audience knowledge; KASANE has no
+access control yet, and scope selectors narrow retrieval but never authorize.
+**Never store secrets, credentials or personal data in KASANE**, in any
+namespace. Writes default to all namespaces on that premise (owner decision,
+#39).
 
 ## Known limits
 

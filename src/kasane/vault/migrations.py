@@ -5,7 +5,7 @@ from __future__ import annotations
 import sqlite3
 from dataclasses import dataclass
 
-CURRENT_SCHEMA_VERSION = 3
+CURRENT_SCHEMA_VERSION = 4
 
 
 @dataclass(frozen=True)
@@ -228,6 +228,40 @@ MIGRATIONS = (
             *_append_only_event_table(
                 _EVENT_VALUES_V3, copy_from="knowledge_events_v2"
             ),
+        ),
+    ),
+    Migration(
+        version=4,
+        name="operator_actions",
+        statements=(
+            """
+            CREATE TABLE operator_actions (
+                sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+                action TEXT NOT NULL CHECK (
+                    action IN ('FREEZE','UNFREEZE','BLOCK_ACTOR','UNBLOCK_ACTOR',
+                               'QUARANTINE')
+                ),
+                target TEXT,
+                reason TEXT NOT NULL CHECK (length(trim(reason)) > 0),
+                details_json TEXT NOT NULL,
+                actor TEXT NOT NULL,
+                timestamp TEXT NOT NULL
+            )
+            """,
+            """
+            CREATE TRIGGER operator_actions_no_update
+            BEFORE UPDATE ON operator_actions
+            BEGIN
+                SELECT RAISE(ABORT, 'operator_actions is append-only');
+            END
+            """,
+            """
+            CREATE TRIGGER operator_actions_no_delete
+            BEFORE DELETE ON operator_actions
+            BEGIN
+                SELECT RAISE(ABORT, 'operator_actions is append-only');
+            END
+            """,
         ),
     ),
 )

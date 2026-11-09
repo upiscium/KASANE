@@ -549,7 +549,7 @@ def test_reopen_preserves_state_and_history(
 def test_schema_version_and_initialization_are_deterministic(
     repository: VaultRepository,
 ) -> None:
-    assert repository.current_schema_version() == CURRENT_SCHEMA_VERSION == 3
+    assert repository.current_schema_version() == CURRENT_SCHEMA_VERSION == 4
     VaultRepository(repository.database_path)
     connection = sqlite3.connect(repository.database_path)
     try:
@@ -562,6 +562,7 @@ def test_schema_version_and_initialization_are_deterministic(
         (1, "vault_core_v0_1"),
         (2, "append_only_and_verification_outcomes"),
         (3, "trust_signal_events"),
+        (4, "operator_actions"),
     ]
 
 
@@ -584,7 +585,7 @@ def test_v2_vault_migrates_to_v3_preserving_events(tmp_path: Path) -> None:
             actor="agent:a",
         )
     upgraded = VaultRepository(path)
-    assert upgraded.current_schema_version() == 3
+    assert upgraded.current_schema_version() == 4
     ref = "vault://global/migration/keep"
     assert [event.event_type for event in upgraded.list_events(ref)] == [
         EventType.CREATED
