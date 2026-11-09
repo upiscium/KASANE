@@ -1153,3 +1153,100 @@ def test_every_protocol_artifact_validates_against_schema(
         else:
             assert result.error is not None
             ERROR_VALIDATOR.validate(result.error)
+
+
+# Regression tests for independent review findings on PR #45 -----------------
+
+
+def _earn(repository: VaultRepository, ref: str, body: str, successes: int) -> None:
+    from kasane.trust import AgentContext, TrustService
+
+    trust = TrustService(repository)
+    trust.propose(
+        {
+            "schema_version": "0.1",
+            "knowledge_ref": ref,
+            "knowledge_type": "procedure",
+            "title": ref.rsplit("/", 1)[-1],
+            "body": body,
+            "sources": [{"source_type": "other", "handle": "test"}],
+        },
+        AgentContext("author", f"s-{ref}", "m1"),
+    )
+    signal = {"schema_version": "0.1", "knowledge_ref": ref}
+    trust.signal(
+        {**signal, "kind": "verification", "verification": "passed", "note": "ok"},
+        AgentContext("verifier", f"v-{ref}", "m1"),
+    )
+    for index in range(successes):
+        trust.signal(
+            {**signal, "kind": "outcome", "outcome": "success", "note": "ok"},
+            AgentContext("user", f"u{index}-{ref}", "m1"),
+        )
+
+
+@pytest.mark.parametrize("bad", [["T1"], {"tier": "T1"}, 1, None])
+def test_non_string_min_trust_is_a_value_error(
+    service: Level0RetrievalService, bad: Any
+) -> None:
+    with pytest.raises(ValueError, match="min_trust"):
+        service.retrieve({**request("anything"), "min_trust": bad})
+
+
+def test_t2_excludes_verified_with_a_single_success(
+    repository: VaultRepository, service: Level0RetrievalService
+) -> None:
+    _earn(repository, "vault://global/trust/once", "tier boundary marker", 1)
+    t2 = {**request("tier boundary marker"), "min_trust": "T2"}
+    assert selected_uris(service.retrieve(t2).capsule or {"knowledge_refs": []}) == []
+    t1 = service.retrieve({**t2, "min_trust": "T1"})
+    assert t1.capsule is not None
+    assert [item["trust"] for item in t1.capsule["knowledge_refs"]] == [{"tier": "T1"}]
+
+
+def test_t2_outranks_t1_on_equal_relevance(
+    repository: VaultRepository, service: Level0RetrievalService
+) -> None:
+    _earn(repository, "vault://global/trust/a-once", "tie marker", 1)
+    _earn(repository, "vault://global/trust/z-twice", "tie marker", 2)
+    result = service.retrieve(request("tie marker"))
+    assert result.capsule is not None
+    assert [item["trust"]["tier"] for item in result.capsule["knowledge_refs"]] == [
+        "T2",
+        "T1",
+    ]
+
+
+def test_t0_includes_candidate_with_a_reported_failure(
+    repository: VaultRepository, service: Level0RetrievalService
+) -> None:
+    from kasane.trust import AgentContext, TrustService
+
+    trust = TrustService(repository)
+    ref = "vault://global/trust/shaky"
+    trust.propose(
+        {
+            "schema_version": "0.1",
+            "knowledge_ref": ref,
+            "knowledge_type": "pitfall",
+            "title": "Shaky",
+            "body": "candidate failure marker",
+            "sources": [{"source_type": "other", "handle": "t"}],
+        },
+        AgentContext("author", "s", "m1"),
+    )
+    trust.signal(
+        {
+            "schema_version": "0.1",
+            "knowledge_ref": ref,
+            "kind": "outcome",
+            "outcome": "failure",
+            "note": "did not hold",
+        },
+        AgentContext("user", "f1", "m1"),
+    )
+    result = service.retrieve(
+        {**request("candidate failure marker"), "min_trust": "T0"}
+    )
+    assert result.capsule is not None
+    assert result.capsule["knowledge_refs"][0]["trust"] == {"tier": "T0"}

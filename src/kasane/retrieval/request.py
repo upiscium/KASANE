@@ -79,7 +79,7 @@ def parse_retrieval_request(value: Mapping[str, Any]) -> RetrievalRequest:
 
     task = _parse_task(value["task"]) if "task" in value else None
     min_trust = value.get("min_trust", "T1")
-    if min_trust not in TRUST_TIERS:
+    if not isinstance(min_trust, str) or min_trust not in TRUST_TIERS:
         raise ValueError("min_trust must be one of T0, T1, T2, T3")
     return RetrievalRequest(
         query=query,

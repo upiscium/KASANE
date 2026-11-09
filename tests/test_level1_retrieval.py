@@ -688,3 +688,55 @@ def test_internal_failure_is_not_labeled_as_provider_failure(
         repository, tmp_path, semantic=BrokenInternal(), reranker=CountingReranker()
     ).retrieve({**request("internal"), "mode": "thorough"})
     assert result.diagnostics.fallback_reason == "level1_internal_failure"
+
+
+def test_thorough_capsule_labels_every_ref_across_tiers(repository, tmp_path) -> None:
+    from kasane.trust import AgentContext, TrustService
+
+    trust = TrustService(repository)
+    bodies = {
+        "alpha": "labelling marker: rebuild caches after deploys",
+        "beta": "labelling marker: rotate credentials quarterly with audit trail",
+    }
+    for name, body in bodies.items():
+        trust.propose(
+            {
+                "schema_version": "0.1",
+                "knowledge_ref": f"vault://global/mixed/{name}",
+                "knowledge_type": "procedure",
+                "title": f"{name.title()} operations note",
+                "body": body,
+                "sources": [{"source_type": "other", "handle": "t"}],
+            },
+            AgentContext("author", f"s-{name}", "m1"),
+        )
+    trust.signal(
+        {
+            "schema_version": "0.1",
+            "knowledge_ref": "vault://global/mixed/alpha",
+            "kind": "verification",
+            "verification": "passed",
+            "note": "ok",
+        },
+        AgentContext("verifier", "v", "m1"),
+    )
+    service = _service(repository, tmp_path)
+    result = service.retrieve(
+        {
+            "schema_version": "0.1",
+            "query": "labelling marker",
+            "mode": "thorough",
+            "min_trust": "T0",
+            "budget": {
+                "max_tokens": 20000,
+                "max_bytes": 40000,
+                "max_evidence_items": 5,
+            },
+        }
+    )
+    refs = result.artifact.get("knowledge_refs", [])
+    assert refs, result.artifact
+    assert {item["uri"]: item["trust"]["tier"] for item in refs} == {
+        "vault://global/mixed/alpha": "T1",
+        "vault://global/mixed/beta": "T0",
+    }

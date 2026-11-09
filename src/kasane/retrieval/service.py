@@ -202,7 +202,7 @@ class Level0RetrievalService:
                     scope_specificity=self._scope_specificity(
                         record.knowledge_ref, request.scope
                     ),
-                    trust_rank=status_tier(record) or 0,
+                    trust_rank=self._tier(record),
                 )
             )
         return sorted(

@@ -10,7 +10,7 @@ This directory freezes a reproducible measurement of the Issue #6 Level 0 implem
 - `baseline.json`: canonical deterministic report, including fixture/query/profile and production-implementation hashes.
   The snapshot test compares the **whole** report, including `implementation_sha256`:
   any change to the hashed retrieval files (`budget.py`, `eligibility.py`, `index.py`,
-  `models.py`, `request.py`, `service.py`) must regenerate this file in the same change,
+  `models.py`, `request.py`, `service.py`, plus `trust/policy.py`) must regenerate this file in the same change,
   and reviewers check that only intended fields moved (#37).
 - The reference run is **canonical-only** (`min_trust: "T3"` is applied by the evaluator);
   lower trust tiers are covered by unit tests (#41).

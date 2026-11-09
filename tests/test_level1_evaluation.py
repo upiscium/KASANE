@@ -70,7 +70,7 @@ def test_level1_preserves_every_level0_strong_query_class() -> None:
 
 def test_level0_baseline_is_not_modified_by_level1_generation() -> None:
     assert hashlib.sha256(BASELINE.read_bytes()).hexdigest() == (
-        "d09d579f12b72ff8991af93cd9757fbc3ce44d7dc3c32891432c079e6a3fa92a"
+        "61a3e88892a3c6dc1d2d0f7b93eeb43a5d768216a5ad657d848f7fe05518eb7b"
     )
 
 

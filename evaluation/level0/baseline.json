@@ -36,7 +36,7 @@
   "dataset_version": "level0-golden-v1",
   "fixture_sha256": "e304a65ea316802d1e68f900f73efd2422cf30410e8feaf96030623cbcfe3f3c",
   "implementation": "Level0RetrievalService issue-6 baseline",
-  "implementation_sha256": "791d2003256d477b8924245f4fb9732b5aeb03b440df975c7e87b377fd4df632",
+  "implementation_sha256": "94c16f0e077c5a7127be5df2d289a4908f6ab77bb64fcc33427c249461220656",
   "level": 0,
   "level1_recommendation": {
     "basis": "normal profile records 2 candidate-generation misses and 1 ranking miss; expansion and reranking address distinct failures",

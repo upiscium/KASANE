@@ -563,6 +563,11 @@ def _implementation_sha256() -> str:
         digest.update(b"\0")
         digest.update((retrieval_dir / name).read_bytes())
         digest.update(b"\0")
+    # Trust labels and T2 eligibility come from the #40 policy (#41).
+    policy = Path(__file__).parents[1] / "trust" / "policy.py"
+    digest.update(b"trust/policy.py\0")
+    digest.update(policy.read_bytes())
+    digest.update(b"\0")
     return digest.hexdigest()
 
 

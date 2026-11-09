@@ -15,7 +15,7 @@ from mcp.server.stdio import stdio_server
 from kasane.mcp_server import WriteAccess, build_server
 from kasane.retrieval.request import parse_retrieval_request
 from kasane.retrieval.service import Level0RetrievalService
-from kasane.trust import AgentContext, TrustService
+from kasane.trust import AgentContext, TrustPolicyConfig, TrustService
 from kasane.vault.repository import VaultRepository
 
 VAULT_ENV = "KASANE_VAULT_PATH"
@@ -82,9 +82,14 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     vault = _require_vault(parser, args.vault)
     repository = VaultRepository(vault)
-    service = Level0RetrievalService(repository, args.index)
+    # One policy config for retrieval labels and intake, so T2 means the
+    # same thing in capsules and in the approval queue.
+    policy = TrustPolicyConfig()
+    service = Level0RetrievalService(repository, args.index, trust_policy=policy)
     service.rebuild_index()
-    write = _write_access(parser, args, repository) if args.allow_write else None
+    write = (
+        _write_access(parser, args, repository, policy) if args.allow_write else None
+    )
     default_scope = _default_scope(parser, args.default_scopes)
     server = build_server(service, write=write, default_scope=default_scope)
 
@@ -125,6 +130,7 @@ def _write_access(
     parser: argparse.ArgumentParser,
     args: argparse.Namespace,
     repository: VaultRepository,
+    policy: TrustPolicyConfig,
 ) -> WriteAccess:
     if not args.actor or not args.model:
         parser.exit(
@@ -151,7 +157,7 @@ def _write_access(
                 f"kasane-mcp: {SCOPES_ENV} is set but empty; unset it to allow "
                 "all namespaces or list at least one scope\n",
             )
-    return WriteAccess(TrustService(repository, write_scopes=scopes), agent)
+    return WriteAccess(TrustService(repository, policy, write_scopes=scopes), agent)
 
 
 def _require_vault(parser: argparse.ArgumentParser, value: str | None) -> Path:
