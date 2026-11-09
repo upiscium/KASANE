@@ -5,18 +5,24 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+import uuid
 from collections.abc import Sequence
 from pathlib import Path
 
 import anyio
 from mcp.server.stdio import stdio_server
 
-from kasane.mcp_server import build_server
+from kasane.mcp_server import WriteAccess, build_server
 from kasane.retrieval.service import Level0RetrievalService
+from kasane.trust import AgentContext, TrustService
 from kasane.vault.repository import VaultRepository
 
 VAULT_ENV = "KASANE_VAULT_PATH"
 INDEX_ENV = "KASANE_INDEX_PATH"
+ACTOR_ENV = "KASANE_ACTOR"
+MODEL_ENV = "KASANE_MODEL"
+SESSION_ENV = "KASANE_SESSION"
+SCOPES_ENV = "KASANE_WRITE_SCOPES"
 DEFAULT_FIXTURE = (
     Path(__file__).resolve().parents[3] / "evaluation/level0/knowledge-fixture.json"
 )
@@ -29,6 +35,24 @@ def main(argv: Sequence[str] | None = None) -> int:
     serve = commands.add_parser("serve", help="run the MCP server over stdio")
     serve.add_argument("--vault", default=os.environ.get(VAULT_ENV))
     serve.add_argument("--index", default=os.environ.get(INDEX_ENV))
+    serve.add_argument(
+        "--allow-write",
+        action="store_true",
+        help="expose propose/corroborate/verify/report_outcome (off by default)",
+    )
+    serve.add_argument("--actor", default=os.environ.get(ACTOR_ENV))
+    serve.add_argument("--model", default=os.environ.get(MODEL_ENV))
+    serve.add_argument(
+        "--session",
+        default=os.environ.get(SESSION_ENV),
+        help="independence key; defaults to a fresh id per server process",
+    )
+    serve.add_argument(
+        "--write-scope",
+        action="append",
+        dest="write_scopes",
+        help="allowed namespace for writes (repeatable), e.g. project/kasane",
+    )
 
     seed = commands.add_parser(
         "seed-fixture", help="create a NEW dev Vault from the Level 0 fixture"
@@ -48,9 +72,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
 
     vault = _require_vault(parser, args.vault)
-    service = Level0RetrievalService(VaultRepository(vault), args.index)
+    repository = VaultRepository(vault)
+    service = Level0RetrievalService(repository, args.index)
     service.rebuild_index()
-    server = build_server(service)
+    write = _write_access(parser, args, repository) if args.allow_write else None
+    server = build_server(service, write=write)
 
     async def run() -> None:
         async with stdio_server() as (read_stream, write_stream):
@@ -60,6 +86,39 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     anyio.run(run)
     return 0
+
+
+def _write_access(
+    parser: argparse.ArgumentParser,
+    args: argparse.Namespace,
+    repository: VaultRepository,
+) -> WriteAccess:
+    if not args.actor or not args.model:
+        parser.exit(
+            2,
+            f"kasane-mcp: --allow-write needs --actor/{ACTOR_ENV} and "
+            f"--model/{MODEL_ENV}: trust is counted per writer identity\n",
+        )
+    try:
+        agent = AgentContext(
+            actor=args.actor,
+            session=args.session or f"proc-{uuid.uuid4().hex}",
+            model=args.model,
+        )
+    except ValueError as exc:
+        parser.exit(2, f"kasane-mcp: {exc}\n")
+    scopes = args.write_scopes
+    env_scopes = os.environ.get(SCOPES_ENV)
+    if scopes is None and env_scopes is not None:
+        scopes = [scope.strip() for scope in env_scopes.split(",") if scope.strip()]
+        if not scopes:
+            # Ambiguous: an empty value must not silently mean "everywhere".
+            parser.exit(
+                2,
+                f"kasane-mcp: {SCOPES_ENV} is set but empty; unset it to allow "
+                "all namespaces or list at least one scope\n",
+            )
+    return WriteAccess(TrustService(repository, write_scopes=scopes), agent)
 
 
 def _require_vault(parser: argparse.ArgumentParser, value: str | None) -> Path:

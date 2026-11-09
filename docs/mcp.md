@@ -1,7 +1,7 @@
 # MCP server
 
-`kasane-mcp` exposes Level 0 retrieval to agents over MCP (stdio). It has one
-tool:
+`kasane-mcp` exposes KASANE to agents over MCP (stdio). Read-only by default,
+with one tool:
 
 | Tool | Input | Output |
 | --- | --- | --- |
@@ -19,6 +19,51 @@ exact wire artifact, returned both as structured content and as JSON text.
 
 Only `canonical` knowledge is retrievable. Retrieval never writes canonical
 Vault state; it only maintains the disposable derived lexical index.
+
+## Writing knowledge (`--allow-write`)
+
+With `--allow-write`, four intake tools are added (trust rules: `docs/trust.md`):
+
+| Tool | Input | Effect |
+| --- | --- | --- |
+| `kasane_propose` | Knowledge Proposal v0.1 ([schema](../schemas/knowledge-proposal.schema.json)) | New T0 candidate; result lists related knowledge (score ≥ 0.25). Near-duplicates (≥ 0.5) are refused with `error: near_duplicate` and the matching refs |
+| `kasane_corroborate` | `knowledge_ref`, optional `note` | Independent confirmation |
+| `kasane_verify` | `knowledge_ref`, `verification` (`passed`/`failed`/`rejected`), `note` | Candidates only; never your own |
+| `kasane_report_outcome` | `knowledge_ref`, `outcome` (`success`/`failure`), `note` | After applying knowledge to a real task |
+
+Signal tool inputs are subsets of the [signal contract](../schemas/knowledge-signal.schema.json);
+the server adds `schema_version` and `kind` and validates the full signal.
+Refusals (contract violations, self-verification, duplicates, scope) are tool
+errors (`is_error: true`) and leave the Vault unchanged.
+
+Identity is server configuration, never tool input:
+
+| Flag | Env | Meaning |
+| --- | --- | --- |
+| `--actor` | `KASANE_ACTOR` | Writer name (required; `policy`/`operator` reserved) |
+| `--model` | `KASANE_MODEL` | Model behind the writer (required) |
+| `--session` | `KASANE_SESSION` | Independence key; default: fresh id per server process |
+| `--write-scope` | `KASANE_WRITE_SCOPES` (comma-separated) | Allowed namespaces, e.g. `project/kasane`; omitted = all |
+
+```sh
+uv run kasane-mcp serve --vault ~/.local/state/kasane/vault.db \
+  --allow-write --actor opencode --model <model-id> --write-scope project/kasane
+```
+
+**Independence and sessions:** without `--session`, every server process is a
+new session, so an agent that restarts its MCP server counts as a *different*
+independent participant and can corroborate its own earlier proposal. This is
+the accepted weak-independence risk of #40; pin `--session` per agent, and
+enable `require_distinct_models` once several models write.
+
+**Scopes:** `--write-scope` also bounds duplicate checks and `similar` hints, so
+a scoped writer never sees or is blocked by knowledge outside its scopes.
+Omitting it allows writes to every namespace, including `private/*`.
+
+**Before enabling writes in real use:** there is no emergency stop until
+`kasane-admin freeze`/`quarantine` lands, and `kasane_retrieve` still serves only
+canonical knowledge, so agents cannot yet discover candidates except through
+the `similar` list returned by `kasane_propose` (trust-labeled retrieval: #41).
 
 ## Running
 
@@ -82,6 +127,6 @@ Against the seeded dev Vault this returns a ~1.2 KB capsule whose
 
 ## Not yet supported
 
-Write tools (proposing candidates, verification, promotion), Level 1/2,
-HTTP transport, and authentication. Scope selectors narrow retrieval but never
+Human approval tooling (`kasane-admin`), Level 1/2, HTTP transport, and
+authentication. Scope selectors narrow retrieval but never
 grant access, so do not expose this server to untrusted callers.

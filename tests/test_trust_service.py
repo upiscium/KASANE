@@ -455,3 +455,41 @@ def test_reconcile_reports_committed_verification_even_if_promotion_blocked(
     service.repository.record_verification = verify_then_fail  # type: ignore[method-assign]
     assert service.reconcile() == [REF]
     assert service.assess(REF).record.status is KnowledgeStatus.CANDIDATE
+
+
+def test_near_duplicate_refused_across_languages(service: TrustService) -> None:
+    from kasane.trust import DuplicateKnowledgeError
+
+    service.propose(
+        proposal(
+            title="スキーマ変更後は派生インデックスを再構築する",
+            body="インデックスは移行せず、削除して再構築する。",
+            tags=["index"],
+        ),
+        AUTHOR,
+    )
+    with pytest.raises(DuplicateKnowledgeError) as raised:
+        service.propose(
+            proposal(
+                knowledge_ref=REF + "-ja",
+                title="スキーマ変更時は派生インデックスを作り直す",
+                body="インデックスはその場で移行せず、削除してから再構築する。",
+                tags=["index"],
+            ),
+            agent("other"),
+        )
+    assert [m.knowledge_ref for m in raised.value.matches] == [REF]
+    assert len(service.repository.list_knowledge()) == 1
+
+
+def test_retired_knowledge_does_not_block_reproposal(tmp_path: Path) -> None:
+    service = TrustService(VaultRepository(tmp_path / "vault.db"))
+    _to_t2(service)
+    service.reject(REF, reason="superseded")
+    result = service.propose(proposal(knowledge_ref=REF + "-v2"), agent("new"))
+    assert result.record.status is KnowledgeStatus.CANDIDATE
+
+
+def test_duplicate_threshold_validated(tmp_path: Path) -> None:
+    with pytest.raises(ValueError):
+        TrustService(VaultRepository(tmp_path / "v.db"), duplicate_threshold=0)

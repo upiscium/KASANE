@@ -1,29 +1,95 @@
-"""Minimal stdio MCP server exposing Level 0 retrieval as ``kasane_retrieve``."""
+"""stdio MCP server for KASANE.
+
+Always exposes ``kasane_retrieve``. With write access configured it also
+exposes the agent intake tools of Issue #39: ``kasane_propose``,
+``kasane_corroborate``, ``kasane_verify`` and ``kasane_report_outcome``.
+Agent identity (actor, session, model) comes from server configuration.
+"""
 
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping
+import sqlite3
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
 import mcp_types as types
+from jsonschema import Draft202012Validator
 from mcp.server import Server, ServerRequestContext
 
-from kasane.contracts import default_schema_dir, load_schema
+from kasane.contracts import ContractViolationError, default_schema_dir, load_schema
+from kasane.trust import (
+    AgentContext,
+    DuplicateKnowledgeError,
+    TrustRejectedError,
+    TrustService,
+)
 
 TOOL_NAME = "kasane_retrieve"
+PROPOSE_TOOL = "kasane_propose"
+CORROBORATE_TOOL = "kasane_corroborate"
+VERIFY_TOOL = "kasane_verify"
+OUTCOME_TOOL = "kasane_report_outcome"
+WRITE_TOOLS = (PROPOSE_TOOL, CORROBORATE_TOOL, VERIFY_TOOL, OUTCOME_TOOL)
+
+REQUEST_SCHEMA = "retrieval-request.schema.json"
+PROPOSAL_SCHEMA = "knowledge-proposal.schema.json"
+SIGNAL_SCHEMA = "knowledge-signal.schema.json"
+
 TOOL_DESCRIPTION = (
     "Retrieve the smallest sufficient task context from the KASANE knowledge "
     "vault as a Context Capsule v0.1 that fits the requested budget. Only "
     "canonical knowledge is returned. The result is the capsule JSON itself, "
     "or a budget_too_small_for_capsule protocol error."
 )
-REQUEST_SCHEMA = "retrieval-request.schema.json"
+WRITE_DESCRIPTIONS = {
+    PROPOSE_TOOL: (
+        "Record reusable procedural knowledge you established in this session "
+        "(a procedure, design approach, situational guidance, pitfall, or "
+        "constraint) as a new candidate. Cite at least one source. State the "
+        "situation it applies to in the body. Near-duplicates of existing "
+        "knowledge are refused with the matching refs (error near_duplicate): "
+        "corroborate the match instead. A successful result also lists related "
+        "knowledge."
+    ),
+    CORROBORATE_TOOL: (
+        "Independently confirm that existing knowledge matches what you found "
+        "yourself. Do not corroborate knowledge you only read; derive it first."
+    ),
+    VERIFY_TOOL: (
+        "Record an independent verification of a candidate: passed, failed, or "
+        "rejected, with a note on how you checked. You cannot verify your own "
+        "proposals. Only candidates take verifications."
+    ),
+    OUTCOME_TOOL: (
+        "After applying knowledge from KASANE to a real task, report whether it "
+        "worked (success) or not (failure), with a short note on the task. "
+        "Report failures too: they protect other agents."
+    ),
+}
+READ_INSTRUCTIONS = (
+    "Call kasane_retrieve with a Retrieval Request v0.1 before searching for "
+    "project knowledge yourself; trust the capsule's budget."
+)
+WRITE_INSTRUCTIONS = (
+    " Report kasane_report_outcome for knowledge you applied. Propose knowledge "
+    "only when it is reusable beyond this task; prefer corroborating existing "
+    "knowledge over near-duplicates."
+)
 
 
 class RetrievalBackend(Protocol):
     def retrieve(self, request_value: Mapping[str, Any]) -> Any: ...
+
+
+@dataclass(frozen=True)
+class WriteAccess:
+    """Enables the intake tools for one configured agent identity."""
+
+    service: TrustService
+    agent: AgentContext
 
 
 def load_request_schema(schema_dir: Path | None = None) -> dict[str, Any]:
@@ -33,53 +99,161 @@ def load_request_schema(schema_dir: Path | None = None) -> dict[str, Any]:
     not the MCP tool; every field definition is passed through unchanged.
     """
 
-    schema = load_schema(REQUEST_SCHEMA, schema_dir)
-    schema.pop("$id", None)
-    return schema
+    return _tool_schema(REQUEST_SCHEMA, schema_dir)
+
+
+def write_tool_schemas(schema_dir: Path | None = None) -> dict[str, dict[str, Any]]:
+    """Input schemas for the write tools, derived from the SSOT contracts.
+
+    Signal tools take a subset of the signal contract's own property
+    definitions; the server adds ``schema_version`` and ``kind`` and validates
+    the assembled signal against the full contract.
+    """
+
+    signal = load_schema(SIGNAL_SCHEMA, schema_dir)["properties"]
+
+    def subset(required: list[str], optional: list[str]) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "additionalProperties": False,
+            "required": required,
+            "properties": {name: signal[name] for name in [*required, *optional]},
+        }
+
+    return {
+        PROPOSE_TOOL: _tool_schema(PROPOSAL_SCHEMA, schema_dir),
+        CORROBORATE_TOOL: subset(["knowledge_ref"], ["note"]),
+        VERIFY_TOOL: subset(["knowledge_ref", "verification", "note"], []),
+        OUTCOME_TOOL: subset(["knowledge_ref", "outcome", "note"], []),
+    }
 
 
 def build_server(
-    backend: RetrievalBackend, *, schema_dir: Path | None = None
+    backend: RetrievalBackend,
+    *,
+    write: WriteAccess | None = None,
+    schema_dir: Path | None = None,
 ) -> Server[Any]:
-    input_schema = load_request_schema(schema_dir)
-    tool = types.Tool(
-        name=TOOL_NAME,
-        description=TOOL_DESCRIPTION,
-        input_schema=input_schema,
-    )
+    schemas: dict[str, dict[str, Any]] = {TOOL_NAME: load_request_schema(schema_dir)}
+    descriptions = {TOOL_NAME: TOOL_DESCRIPTION}
+    if write is not None:
+        schemas.update(write_tool_schemas(schema_dir))
+        descriptions.update(WRITE_DESCRIPTIONS)
+    tools = [
+        types.Tool(name=name, description=descriptions[name], input_schema=schema)
+        for name, schema in schemas.items()
+    ]
+    handlers: dict[str, Callable[[dict[str, Any]], types.CallToolResult]] = {
+        TOOL_NAME: lambda args: _retrieve(backend, args)
+    }
+    if write is not None:
+        handlers[PROPOSE_TOOL] = lambda args: _propose(write, args)
+        for name, kind in (
+            (CORROBORATE_TOOL, "corroboration"),
+            (VERIFY_TOOL, "verification"),
+            (OUTCOME_TOOL, "outcome"),
+        ):
+            handlers[name] = _signal_handler(write, kind, schemas[name])
 
     async def list_tools(
         ctx: ServerRequestContext[Any], params: types.PaginatedRequestParams | None
     ) -> types.ListToolsResult:
-        return types.ListToolsResult(tools=[tool])
+        return types.ListToolsResult(tools=tools)
 
     async def call_tool(
         ctx: ServerRequestContext[Any], params: types.CallToolRequestParams
     ) -> types.CallToolResult:
-        if params.name != TOOL_NAME:
+        handler = handlers.get(params.name)
+        if handler is None:
             return _tool_error(f"unknown tool: {params.name}")
-        try:
-            result = backend.retrieve(dict(params.arguments or {}))
-        except ValueError as exc:
-            # Malformed requests have no v0.1 wire error; report at tool level.
-            return _tool_error(f"invalid retrieval request: {exc}")
-        artifact: dict[str, Any] = result.artifact
-        return types.CallToolResult(
-            content=[types.TextContent(type="text", text=_dumps(artifact))],
-            structured_content=artifact,
-            is_error=result.error is not None,
-        )
+        return handler(dict(params.arguments or {}))
 
     return Server(
         "kasane",
         version=_version(),
-        instructions=(
-            "Call kasane_retrieve with a Retrieval Request v0.1 before searching "
-            "for project knowledge yourself; trust the capsule's budget."
-        ),
-        get_tool_input_schema=lambda name: input_schema if name == TOOL_NAME else None,
+        instructions=READ_INSTRUCTIONS + (WRITE_INSTRUCTIONS if write else ""),
+        get_tool_input_schema=schemas.get,
         on_list_tools=list_tools,
         on_call_tool=call_tool,
+    )
+
+
+def _retrieve(backend: RetrievalBackend, args: dict[str, Any]) -> types.CallToolResult:
+    try:
+        result = backend.retrieve(args)
+    except ValueError as exc:
+        # Malformed requests have no v0.1 wire error; report at tool level.
+        return _tool_error(f"invalid retrieval request: {exc}")
+    artifact: dict[str, Any] = result.artifact
+    return _structured(artifact, is_error=result.error is not None)
+
+
+def _propose(write: WriteAccess, args: dict[str, Any]) -> types.CallToolResult:
+    try:
+        result = write.service.propose(args, write.agent)
+    except sqlite3.Error as exc:
+        return _tool_error(f"vault unavailable, retry later: {exc}")
+    except DuplicateKnowledgeError as exc:
+        # Machine-readable so the agent can corroborate the match directly.
+        return _structured(
+            {
+                "error": "near_duplicate",
+                "message": str(exc),
+                "similar": [match.summary() for match in exc.matches],
+            },
+            is_error=True,
+        )
+    except (ContractViolationError, TrustRejectedError) as exc:
+        return _tool_error(f"proposal refused: {exc}")
+    similar = write.service.similar(
+        result.record.title,
+        result.record.tags,
+        result.record.body,
+        exclude_ref=result.record.knowledge_ref,
+    )
+    payload = {
+        **result.summary(),
+        "similar": [item.summary() for item in similar],
+    }
+    return _structured(payload)
+
+
+def _signal_handler(
+    write: WriteAccess, kind: str, schema: dict[str, Any]
+) -> Callable[[dict[str, Any]], types.CallToolResult]:
+    # The SDK does not enforce input schemas over stdio, so validate here:
+    # otherwise a caller could pass `kind` and turn one tool into another.
+    validator = Draft202012Validator(schema)
+
+    def handle(args: dict[str, Any]) -> types.CallToolResult:
+        errors = sorted(validator.iter_errors(args), key=lambda e: list(e.path))
+        if errors:
+            return _tool_error(f"{kind} refused: {errors[0].message}")
+        signal = {**args, "schema_version": "0.1", "kind": kind}
+        try:
+            result = write.service.signal(signal, write.agent)
+        except sqlite3.Error as exc:
+            return _tool_error(f"vault unavailable, retry later: {exc}")
+        except (ContractViolationError, TrustRejectedError) as exc:
+            return _tool_error(f"{kind} refused: {exc}")
+        return _structured(result.summary())
+
+    return handle
+
+
+def _tool_schema(name: str, schema_dir: Path | None) -> dict[str, Any]:
+    schema = load_schema(name, schema_dir)
+    schema.pop("$id", None)
+    return schema
+
+
+def _structured(
+    value: dict[str, Any], *, is_error: bool = False
+) -> types.CallToolResult:
+    return types.CallToolResult(
+        content=[types.TextContent(type="text", text=_dumps(value))],
+        structured_content=value,
+        is_error=is_error,
     )
 
 
@@ -102,4 +276,13 @@ def _version() -> str:
         return "0.0.0"
 
 
-__all__ = ["TOOL_NAME", "build_server", "default_schema_dir", "load_request_schema"]
+__all__ = [
+    "PROPOSE_TOOL",
+    "TOOL_NAME",
+    "WRITE_TOOLS",
+    "WriteAccess",
+    "build_server",
+    "default_schema_dir",
+    "load_request_schema",
+    "write_tool_schemas",
+]

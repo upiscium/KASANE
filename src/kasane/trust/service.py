@@ -3,13 +3,18 @@
 from __future__ import annotations
 
 import sqlite3
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
 from kasane.contracts import validate_contract
-from kasane.vault.errors import KnowledgeNotFoundError, StaleRevisionError
+from kasane.vault.errors import (
+    KnowledgeNotFoundError,
+    StaleRevisionError,
+    VaultError,
+)
 from kasane.vault.identity import parse_knowledge_ref
 from kasane.vault.json_codec import JsonValue
 from kasane.vault.models import (
@@ -31,15 +36,32 @@ from .policy import (
     TrustPolicyConfig,
     evaluate,
 )
+from .similar import SimilarKnowledge, find_similar
 
 PROPOSAL_SCHEMA = "knowledge-proposal.schema.json"
 SIGNAL_SCHEMA = "knowledge-signal.schema.json"
 DEFAULT_MAX_BODY_BYTES = 12_000
 _MAX_POLICY_STEPS = 4
+# Measured on paraphrases: reworded duplicates scored 0.58 (ja) / 0.78 (en);
+# same-topic different advice 0.27. Tentative until real data exists.
+DEFAULT_DUPLICATE_THRESHOLD = 0.5
+DEFAULT_HINT_THRESHOLD = 0.25
 
 
 class TrustRejectedError(ValueError):
     """A write was refused; the Vault is unchanged."""
+
+
+class DuplicateKnowledgeError(TrustRejectedError):
+    """A proposal nearly duplicates live knowledge; corroborate that instead."""
+
+    def __init__(self, matches: list[SimilarKnowledge]) -> None:
+        self.matches = matches
+        refs = ", ".join(match.knowledge_ref for match in matches)
+        super().__init__(
+            f"near-duplicate of existing knowledge ({refs}); corroborate it "
+            "instead, or make the proposal distinct"
+        )
 
 
 @dataclass(frozen=True)
@@ -84,16 +106,26 @@ class TrustService:
         *,
         write_scopes: Sequence[str] | None = None,
         max_body_bytes: int = DEFAULT_MAX_BODY_BYTES,
+        duplicate_threshold: float = DEFAULT_DUPLICATE_THRESHOLD,
     ) -> None:
+        if not 0 < duplicate_threshold <= 1:
+            raise ValueError("duplicate_threshold must be in (0, 1]")
         self.repository = repository
         self.config = config or DEFAULT_POLICY
         # An empty list means "nowhere", not "everywhere".
         self.write_scopes = None if write_scopes is None else tuple(write_scopes)
         self.max_body_bytes = max_body_bytes
+        self.duplicate_threshold = duplicate_threshold
 
     # Agent operations -------------------------------------------------
 
     def propose(self, proposal: Mapping[str, Any], agent: AgentContext) -> TrustResult:
+        with _refusing():
+            return self._propose_unchecked(proposal, agent)
+
+    def _propose_unchecked(
+        self, proposal: Mapping[str, Any], agent: AgentContext
+    ) -> TrustResult:
         validate_contract(PROPOSAL_SCHEMA, proposal)
         ref = str(proposal["knowledge_ref"])
         self._require_writable(ref)
@@ -107,6 +139,14 @@ class TrustService:
             raise TrustRejectedError(
                 f"{ref} already exists; corroborate it instead of re-proposing"
             )
+        duplicates = self.similar(
+            str(proposal["title"]),
+            [str(tag) for tag in proposal.get("tags", [])],
+            body,
+            threshold=self.duplicate_threshold,
+        )
+        if duplicates:
+            raise DuplicateKnowledgeError(duplicates)
         draft = KnowledgeDraft(
             knowledge_ref=ref,
             knowledge_type=str(proposal["knowledge_type"]),
@@ -127,6 +167,12 @@ class TrustService:
         return self.assess(ref)
 
     def signal(self, signal: Mapping[str, Any], agent: AgentContext) -> TrustResult:
+        with _refusing():
+            return self._signal_unchecked(signal, agent)
+
+    def _signal_unchecked(
+        self, signal: Mapping[str, Any], agent: AgentContext
+    ) -> TrustResult:
         validate_contract(SIGNAL_SCHEMA, signal)
         ref = str(signal["knowledge_ref"])
         self._require_writable(ref)
@@ -186,6 +232,30 @@ class TrustService:
         )
         return TrustResult(record, assessment, events[-1].event_id if events else None)
 
+    def similar(
+        self,
+        title: str,
+        tags: Sequence[str],
+        body: str,
+        *,
+        exclude_ref: str | None = None,
+        threshold: float = DEFAULT_HINT_THRESHOLD,
+    ) -> list[SimilarKnowledge]:
+        """Similar live knowledge, limited to this writer's scopes.
+
+        Out-of-scope records are never compared or disclosed: a scoped writer
+        must not learn about, or be blocked by, knowledge it cannot touch.
+        """
+
+        records = [
+            record
+            for record in self.repository.list_knowledge()
+            if self._in_scope(record.knowledge_ref)
+        ]
+        return find_similar(
+            title, tags, body, records, exclude_ref=exclude_ref, threshold=threshold
+        )
+
     def approval_queue(self) -> list[TrustResult]:
         results = [
             self.assess(record.knowledge_ref)
@@ -197,6 +267,12 @@ class TrustService:
     # Human operations (approval queue) --------------------------------
 
     def approve(self, knowledge_ref: str, *, note: str | None = None) -> TrustResult:
+        with _refusing():
+            return self._approve_unchecked(knowledge_ref, note=note)
+
+    def _approve_unchecked(
+        self, knowledge_ref: str, *, note: str | None = None
+    ) -> TrustResult:
         current = self.assess(knowledge_ref)
         if not current.assessment.approval_eligible:
             raise TrustRejectedError(
@@ -208,6 +284,10 @@ class TrustService:
         return self.assess(knowledge_ref)
 
     def reject(self, knowledge_ref: str, *, reason: str) -> TrustResult:
+        with _refusing():
+            return self._reject_unchecked(knowledge_ref, reason=reason)
+
+    def _reject_unchecked(self, knowledge_ref: str, *, reason: str) -> TrustResult:
         """Decline a T2 item in the approval queue. Not an emergency tool."""
 
         if not reason.strip():
@@ -235,7 +315,11 @@ class TrustService:
         for record in self.repository.list_knowledge():
             if record.status in (KnowledgeStatus.DEPRECATED, KnowledgeStatus.ARCHIVED):
                 continue
-            if self._apply_policy(record.knowledge_ref):
+            try:
+                acted = self._apply_policy(record.knowledge_ref)
+            except VaultError:
+                continue  # one bad record must not stop the sweep
+            if acted:
                 changed.append(record.knowledge_ref)
         return changed
 
@@ -374,16 +458,23 @@ class TrustService:
         return True
 
     def _require_writable(self, knowledge_ref: str) -> None:
-        identity = parse_knowledge_ref(knowledge_ref)
-        if self.write_scopes is None:
-            return
-        if not any(
-            identity.namespace == scope or identity.namespace.startswith(scope + "/")
-            for scope in self.write_scopes
-        ):
+        parse_knowledge_ref(knowledge_ref)  # malformed refs refused via _refusing
+        if not self._in_scope(knowledge_ref):
             raise TrustRejectedError(
                 f"{knowledge_ref} is outside the allowed write scopes"
             )
+
+    def _in_scope(self, knowledge_ref: str) -> bool:
+        try:
+            namespace = parse_knowledge_ref(knowledge_ref).namespace
+        except VaultError:
+            return False
+        if self.write_scopes is None:
+            return True
+        return any(
+            namespace == scope or namespace.startswith(scope + "/")
+            for scope in self.write_scopes
+        )
 
     def _get(self, knowledge_ref: str) -> KnowledgeRecord:
         try:
@@ -406,3 +497,17 @@ def _require_aware_timestamp(value: str) -> None:
         raise TrustRejectedError(f"stale_after is not ISO 8601: {value}") from error
     if parsed.tzinfo is None:
         raise TrustRejectedError("stale_after must include a timezone")
+
+
+@contextmanager
+def _refusing() -> Iterator[None]:
+    """Surface Vault-level refusals as TrustRejectedError (Vault unchanged)."""
+
+    try:
+        yield
+    except StaleRevisionError as error:
+        raise TrustRejectedError(
+            f"changed concurrently; re-read and retry ({error})"
+        ) from error
+    except VaultError as error:
+        raise TrustRejectedError(str(error)) from error
