@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Literal
 
-from agentknowledgevault.vault.models import KnowledgeRecord, KnowledgeStatus
+from kasane.vault.models import KnowledgeRecord, KnowledgeStatus
 
 Freshness = Literal["fresh", "stale", "malformed"]
 ExclusionReason = Literal[

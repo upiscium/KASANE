@@ -11,8 +11,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from agentknowledgevault.vault.models import KnowledgeRecord
-from agentknowledgevault.vault.repository import VaultRepository
+from kasane.vault.models import KnowledgeRecord
+from kasane.vault.repository import VaultRepository
 
 from .budget import BudgetAccountant, ExactTokenCounter
 from .eligibility import (

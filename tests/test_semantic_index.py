@@ -7,14 +7,14 @@ from pathlib import Path
 
 import pytest
 
-from agentknowledgevault.retrieval.embeddings import (
+from kasane.retrieval.embeddings import (
     MAX_SEMANTIC_DOCUMENT_BYTES,
     SEMANTIC_DOCUMENT_REPRESENTATION_VERSION,
     semantic_document,
 )
-from agentknowledgevault.retrieval.semantic_candidates import SemanticCandidateService
-from agentknowledgevault.retrieval.semantic_index import DerivedSemanticIndex
-from agentknowledgevault.vault.models import KnowledgeRecord, KnowledgeStatus
+from kasane.retrieval.semantic_candidates import SemanticCandidateService
+from kasane.retrieval.semantic_index import DerivedSemanticIndex
+from kasane.vault.models import KnowledgeRecord, KnowledgeStatus
 
 
 class FakeProvider:

@@ -4,8 +4,8 @@ import hashlib
 import json
 from pathlib import Path
 
-from agentknowledgevault.evaluation.semantic import generate_semantic_report
-from agentknowledgevault.retrieval import DeterministicEmbeddingProvider
+from kasane.evaluation.semantic import generate_semantic_report
+from kasane.retrieval import DeterministicEmbeddingProvider
 
 ROOT = Path(__file__).parents[1]
 FIXTURE = ROOT / "evaluation/level0/knowledge-fixture.json"

@@ -6,15 +6,15 @@ from datetime import UTC, datetime
 
 from test_semantic_index import FakeProvider, record
 
-from agentknowledgevault.retrieval import (
+from kasane.retrieval import (
     SemanticCandidateService,
 )
-from agentknowledgevault.retrieval.semantic_candidates import (
+from kasane.retrieval.semantic_candidates import (
     MAX_SEMANTIC_CANDIDATES,
     MAX_SEMANTIC_RECORDS,
 )
-from agentknowledgevault.retrieval.semantic_index import DerivedSemanticIndex
-from agentknowledgevault.vault.models import KnowledgeStatus
+from kasane.retrieval.semantic_index import DerivedSemanticIndex
+from kasane.vault.models import KnowledgeStatus
 
 
 def test_candidates_are_traceable_and_gate_all_ineligible_records(tmp_path) -> None:

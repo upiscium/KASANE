@@ -5,7 +5,7 @@ artifact. The Level 0 fixture and `evaluation/level0/baseline.json` are inputs a
 are never updated by Level 1 evaluation.
 
 Generate a report with `generate_level1_report` from
-`agentknowledgevault.evaluation.level1` and write it with `write_level1_report`.
+`kasane.evaluation.level1` and write it with `write_level1_report`.
 
 Level 1 uses deterministic limits of 32 semantic candidates, 32 reranker
 candidates/results, and a combined limit of exactly 2,048 UTF-8 bytes for each

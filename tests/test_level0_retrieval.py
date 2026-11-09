@@ -10,7 +10,7 @@ from typing import Any
 import pytest
 from jsonschema import Draft202012Validator
 
-from agentknowledgevault import (
+from kasane import (
     KnowledgeDraft,
     KnowledgeRecord,
     KnowledgeStatus,
@@ -19,8 +19,8 @@ from agentknowledgevault import (
     VerificationOutcome,
     accounting_payload,
 )
-from agentknowledgevault.retrieval import RetrievalEligibility
-from agentknowledgevault.retrieval.request import parse_retrieval_request
+from kasane.retrieval import RetrievalEligibility
+from kasane.retrieval.request import parse_retrieval_request
 
 ROOT = Path(__file__).parents[1]
 CAPSULE_VALIDATOR = Draft202012Validator(

@@ -12,8 +12,8 @@ from dataclasses import dataclass
 from numbers import Real
 from typing import Protocol, TypeAlias, cast
 
-from agentknowledgevault.vault.json_codec import JsonValue, canonical_json
-from agentknowledgevault.vault.models import KnowledgeRecord
+from kasane.vault.json_codec import JsonValue, canonical_json
+from kasane.vault.models import KnowledgeRecord
 
 EmbeddingVector: TypeAlias = Sequence[float]
 SEMANTIC_DOCUMENT_REPRESENTATION_VERSION = "semantic-document-v1"

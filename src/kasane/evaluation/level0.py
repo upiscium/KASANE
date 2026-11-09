@@ -12,15 +12,15 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from agentknowledgevault.retrieval.request import parse_retrieval_request
-from agentknowledgevault.retrieval.service import Level0RetrievalService
-from agentknowledgevault.vault.models import (
+from kasane.retrieval.request import parse_retrieval_request
+from kasane.retrieval.service import Level0RetrievalService
+from kasane.vault.models import (
     KnowledgeDraft,
     KnowledgeRecord,
     KnowledgeStatus,
     VerificationOutcome,
 )
-from agentknowledgevault.vault.repository import VaultRepository
+from kasane.vault.repository import VaultRepository
 
 JsonObject = dict[str, Any]
 TOP_K = 3
@@ -587,7 +587,7 @@ def main() -> None:
     )
     parser.add_argument("--output", default=root / "evaluation/level0/baseline.json")
     args = parser.parse_args()
-    with tempfile.TemporaryDirectory(prefix="agentknowledgevault-level0-eval-") as temp:
+    with tempfile.TemporaryDirectory(prefix="kasane-level0-eval-") as temp:
         report = generate_level0_report(args.fixture, args.queries, args.profiles, temp)
     write_report(report, args.output)
 

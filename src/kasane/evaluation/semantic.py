@@ -9,14 +9,14 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from agentknowledgevault.retrieval import (
+from kasane.retrieval import (
     DeterministicEmbeddingProvider,
     SemanticCandidateService,
 )
-from agentknowledgevault.retrieval.request import parse_retrieval_request
-from agentknowledgevault.retrieval.semantic_index import DerivedSemanticIndex
-from agentknowledgevault.vault.models import KnowledgeDraft, KnowledgeStatus
-from agentknowledgevault.vault.repository import VaultRepository
+from kasane.retrieval.request import parse_retrieval_request
+from kasane.retrieval.semantic_index import DerivedSemanticIndex
+from kasane.vault.models import KnowledgeDraft, KnowledgeStatus
+from kasane.vault.repository import VaultRepository
 
 JsonObject = dict[str, Any]
 
@@ -118,7 +118,7 @@ def _load(path: str | Path) -> JsonObject:
 
 
 def _store_records(repository: VaultRepository, records: list[JsonObject]) -> None:
-    from agentknowledgevault.evaluation.level0 import _store_record
+    from kasane.evaluation.level0 import _store_record
 
     for item in records:
         draft = KnowledgeDraft(

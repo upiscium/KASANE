@@ -17,8 +17,8 @@ from contextlib import closing
 from dataclasses import dataclass
 from pathlib import Path
 
-from agentknowledgevault.vault.json_codec import JsonValue, canonical_json
-from agentknowledgevault.vault.models import KnowledgeRecord
+from kasane.vault.json_codec import JsonValue, canonical_json
+from kasane.vault.models import KnowledgeRecord
 
 from .embeddings import (
     SEMANTIC_DOCUMENT_REPRESENTATION_VERSION,

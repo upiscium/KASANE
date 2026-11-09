@@ -1,5 +1,5 @@
 def main() -> None:
-    print("Hello from agentknowledgevault!")
+    print("Hello from kasane!")
 
 
 if __name__ == "__main__":

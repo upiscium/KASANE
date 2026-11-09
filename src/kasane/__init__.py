@@ -1,4 +1,4 @@
-"""AgentKnowledgeVault public Python package."""
+"""KASANE public Python package."""
 
 from .retrieval import (
     ExactTokenCounter,

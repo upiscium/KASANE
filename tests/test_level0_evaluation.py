@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from agentknowledgevault.evaluation.level0 import (
+from kasane.evaluation.level0 import (
     classify_failures,
     generate_level0_report,
     no_match_correct,
