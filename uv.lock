@@ -386,6 +386,7 @@ name = "kasane-knowledge"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "jsonschema" },
     { name = "mcp" },
 ]
 
@@ -399,7 +400,10 @@ dev = [
 ]
 
 [package.metadata]
-requires-dist = [{ name = "mcp", specifier = ">=2.3,<3" }]
+requires-dist = [
+    { name = "jsonschema", specifier = ">=4.23" },
+    { name = "mcp", specifier = ">=2.3,<3" },
+]
 
 [package.metadata.requires-dev]
 dev = [

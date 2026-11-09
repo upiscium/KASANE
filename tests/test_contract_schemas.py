@@ -246,9 +246,20 @@ def test_schemas_are_valid_draft_2020_12() -> None:
     Draft202012Validator.check_schema(REQUEST_SCHEMA)
     Draft202012Validator.check_schema(CAPSULE_SCHEMA)
     Draft202012Validator.check_schema(ERROR_SCHEMA)
-    assert REQUEST_SCHEMA["$id"].endswith("/v0.1/retrieval-request.schema.json")
-    assert CAPSULE_SCHEMA["$id"].endswith("/v0.1/context-capsule.schema.json")
-    assert ERROR_SCHEMA["$id"].endswith("/v0.1/retrieval-error.schema.json")
+    assert REQUEST_SCHEMA["$id"] == "urn:kasane:schema:v0.1:retrieval-request"
+    assert CAPSULE_SCHEMA["$id"] == "urn:kasane:schema:v0.1:context-capsule"
+    assert ERROR_SCHEMA["$id"] == "urn:kasane:schema:v0.1:retrieval-error"
+
+
+def test_every_schema_id_is_a_kasane_urn_matching_its_file() -> None:
+    schema_dir = Path(__file__).resolve().parents[1] / "schemas"
+    files = sorted(schema_dir.glob("*.schema.json"))
+    assert len(files) == 5
+    for path in files:
+        schema = json.loads(path.read_text("utf-8"))
+        Draft202012Validator.check_schema(schema)
+        name = path.name.removesuffix(".schema.json")
+        assert schema["$id"] == f"urn:kasane:schema:v0.1:{name}"
 
 
 def test_simple_query_does_not_require_task() -> None:

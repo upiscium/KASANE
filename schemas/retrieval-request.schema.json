@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://agentknowledgevault.dev/schemas/v0.1/retrieval-request.schema.json",
+  "$id": "urn:kasane:schema:v0.1:retrieval-request",
   "title": "Retrieval Request v0.1",
   "description": "A bounded request for a task-scoped Context Capsule.",
   "type": "object",

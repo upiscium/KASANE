@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://agentknowledgevault.dev/schemas/v0.1/context-capsule.schema.json",
+  "$id": "urn:kasane:schema:v0.1:context-capsule",
   "title": "Context Capsule v0.1",
   "description": "A bounded, evidence-preserving, task-scoped retrieval artifact for an Agent.",
   "type": "object",
