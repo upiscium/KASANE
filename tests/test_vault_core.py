@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from agentknowledgevault import (
+from kasane import (
     EventType,
     InvalidKnowledgeIdentityError,
     InvalidLifecycleTransitionError,
@@ -19,8 +19,8 @@ from agentknowledgevault import (
     VaultService,
     VerificationOutcome,
 )
-from agentknowledgevault.vault.config import default_database_path
-from agentknowledgevault.vault.migrations import CURRENT_SCHEMA_VERSION
+from kasane.vault.config import default_database_path
+from kasane.vault.migrations import CURRENT_SCHEMA_VERSION
 
 
 def sequence(prefix: str) -> Callable[[], str]:

@@ -1,3 +1,35 @@
-# agentknowledgevault
+# KASANE
 
-Agent-ready Python project using uv, Ruff, Mypy, Pytest, Nix, Just, and the shared Agent Core.
+KASANE (「重ね」) is a self-hosted, layered canonical knowledge substrate for AI
+systems — coding agents, local LLMs, companion AIs, and other consumers.
+
+Instead of returning raw top-k chunks, KASANE returns a **Context Capsule**: the
+smallest sufficient task context that fits an explicit token budget, so the
+calling model spends as little context and reasoning as possible on knowledge
+lookup.
+
+- Architecture: [`docs/architecture.md`](docs/architecture.md)
+- Wire contracts (SSOT): [`schemas/`](schemas/)
+- Vault Core: [`docs/vault-core.md`](docs/vault-core.md)
+- Level 0 retrieval: [`docs/level-0-retrieval.md`](docs/level-0-retrieval.md)
+
+## Package naming
+
+| Item | Name |
+| --- | --- |
+| Project | KASANE |
+| Python import package | `kasane` |
+| Distribution | `kasane-knowledge` (PyPI `kasane` is an unrelated project) |
+
+The former `agentknowledgevault` import package was removed without a
+compatibility shim: it was never published and had no external consumers.
+Persisted vault data, `vault://` knowledge references, and the v0.1 schema `$id`
+values are unchanged.
+
+## Development
+
+Python environment managed by uv and Nix; tasks run through Just.
+
+```sh
+just project::check
+```

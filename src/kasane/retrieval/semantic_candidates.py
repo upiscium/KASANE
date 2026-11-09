@@ -11,7 +11,7 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from agentknowledgevault.vault.models import KnowledgeRecord
+from kasane.vault.models import KnowledgeRecord
 
 from .eligibility import RetrievalEligibility
 from .embeddings import (

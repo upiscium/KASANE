@@ -7,11 +7,11 @@ import json
 from pathlib import Path
 from typing import Any
 
-from agentknowledgevault.evaluation.semantic import _load, _store_records
-from agentknowledgevault.retrieval import Level1RetrievalService
-from agentknowledgevault.retrieval.fake_embeddings import DeterministicEmbeddingProvider
-from agentknowledgevault.retrieval.rerank import DeterministicRerankProvider
-from agentknowledgevault.vault.repository import VaultRepository
+from kasane.evaluation.semantic import _load, _store_records
+from kasane.retrieval import Level1RetrievalService
+from kasane.retrieval.fake_embeddings import DeterministicEmbeddingProvider
+from kasane.retrieval.rerank import DeterministicRerankProvider
+from kasane.vault.repository import VaultRepository
 
 
 def _no_match_is_correct(item: dict[str, Any]) -> bool:

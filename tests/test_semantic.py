@@ -5,7 +5,7 @@ from dataclasses import replace
 
 import pytest
 
-from agentknowledgevault.retrieval import (
+from kasane.retrieval import (
     SEMANTIC_DOCUMENT_REPRESENTATION_VERSION,
     EmbeddingProvider,
     EmbeddingProviderIdentity,
@@ -16,7 +16,7 @@ from agentknowledgevault.retrieval import (
     validate_embedding_vectors,
     validate_provider_identity,
 )
-from agentknowledgevault.vault.models import KnowledgeRecord, KnowledgeStatus
+from kasane.vault.models import KnowledgeRecord, KnowledgeStatus
 
 
 def record() -> KnowledgeRecord:

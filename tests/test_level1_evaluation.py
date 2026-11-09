@@ -4,7 +4,7 @@ import hashlib
 import json
 from pathlib import Path
 
-from agentknowledgevault.evaluation.level1 import (
+from kasane.evaluation.level1 import (
     _no_match_is_correct,
     generate_level1_report,
     write_level1_report,

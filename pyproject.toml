@@ -1,7 +1,7 @@
 [project]
-name = "agentknowledgevault"
+name = "kasane-knowledge"
 version = "0.1.0"
-description = "A standard Python project managed by uv and Nix"
+description = "KASANE: a self-hosted, layered canonical knowledge substrate for AI systems"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = []
@@ -23,4 +23,4 @@ dev = [
 exclude = [".direnv", ".venv"]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/agentknowledgevault"]
+packages = ["src/kasane"]

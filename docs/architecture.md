@@ -1,6 +1,6 @@
-# AgentKnowledgeVault architecture v0.1
+# KASANE architecture v0.1
 
-AgentKnowledgeVault returns the smallest sufficient task context within an explicit budget. It is not an Agent-facing raw top-k chunk server. The primary integration artifact is a **Context Capsule**; a future raw-retrieval surface may exist only for bounded debugging, evaluation, or administration.
+KASANE returns the smallest sufficient task context within an explicit budget. It is not an Agent-facing raw top-k chunk server. The primary integration artifact is a **Context Capsule**; a future raw-retrieval surface may exist only for bounded debugging, evaluation, or administration.
 
 ## Contract-first boundary
 

@@ -14,7 +14,7 @@ The fixture contains no runtime Vault content, private user data, or secrets.
 ## Reproduction
 
 ```text
-uv run python -m agentknowledgevault.evaluation.level0
+uv run python -m kasane.evaluation.level0
 uv run pytest tests/test_level0_evaluation.py -v
 ```
 

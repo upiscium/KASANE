@@ -7,11 +7,11 @@ from types import SimpleNamespace
 import pytest
 from test_level0_retrieval import NOW, draft, request, store
 
-from agentknowledgevault import VaultRepository
-from agentknowledgevault.retrieval import Level1RetrievalService
-from agentknowledgevault.retrieval.budget import BudgetAccountant
-from agentknowledgevault.retrieval.request import parse_retrieval_request
-from agentknowledgevault.retrieval.rerank import (
+from kasane import VaultRepository
+from kasane.retrieval import Level1RetrievalService
+from kasane.retrieval.budget import BudgetAccountant
+from kasane.retrieval.request import parse_retrieval_request
+from kasane.retrieval.rerank import (
     MAX_PROVIDER_DOCUMENT_BYTES,
     MAX_RERANK_CANDIDATES,
     RerankCandidate,
@@ -19,7 +19,7 @@ from agentknowledgevault.retrieval.rerank import (
     bounded_document,
     union_candidates,
 )
-from agentknowledgevault.retrieval.semantic_candidates import (
+from kasane.retrieval.semantic_candidates import (
     SemanticCandidate,
 )
 
@@ -177,7 +177,7 @@ class CountingReranker:
 
 
 def _service(repository, tmp_path, *, semantic=None, reranker=None):
-    from agentknowledgevault import Level0RetrievalService
+    from kasane import Level0RetrievalService
 
     level0 = Level0RetrievalService(
         repository, tmp_path / "lexical.db", clock=lambda: NOW
