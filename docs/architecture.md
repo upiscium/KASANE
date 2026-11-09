@@ -51,4 +51,4 @@ The returned capsule records the highest level used and the escalation path. Imp
 
 ## Non-goals for v0.1
 
-SQLite/Vault Core persistence, FTS, vector databases, embeddings, rerankers, Librarian implementation, query decomposition, HTTP, MCP, ACL, canonical promotion, and full OKF import/export are outside this contract task.
+SQLite/Vault Core persistence, FTS, vector databases, embeddings, rerankers, Librarian implementation, query decomposition, HTTP, ACL, canonical promotion, and full OKF import/export are outside this contract task. A minimal stdio MCP surface was added later; see [`mcp.md`](mcp.md).

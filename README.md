@@ -12,6 +12,7 @@ lookup.
 - Wire contracts (SSOT): [`schemas/`](schemas/)
 - Vault Core: [`docs/vault-core.md`](docs/vault-core.md)
 - Level 0 retrieval: [`docs/level-0-retrieval.md`](docs/level-0-retrieval.md)
+- MCP server (`kasane-mcp`): [`docs/mcp.md`](docs/mcp.md)
 
 ## Package naming
 
