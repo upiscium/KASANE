@@ -280,6 +280,21 @@ def _evaluate_query(
     }
 
 
+def seed_fixture_vault(fixture_path: str | Path, vault_path: str | Path) -> int:
+    """Create a new dev Vault from the Level 0 fixture; return canonical count.
+
+    Refuses to touch an existing file so a real Vault is never mixed with
+    synthetic fixture knowledge.
+    """
+
+    target = Path(vault_path)
+    if target.exists():
+        raise FileExistsError(f"refusing to seed existing Vault: {target}")
+    records = _object_list(load_json_object(fixture_path), "records")
+    _store_records(VaultRepository(target), records)
+    return sum(1 for item in records if item["status"] == "canonical")
+
+
 def _store_records(repository: VaultRepository, records: list[JsonObject]) -> None:
     for item in records:
         status = KnowledgeStatus(str(item["status"]))
