@@ -49,6 +49,14 @@ Agent identity (`actor`, `session`, `model`) comes from server configuration,
 never from these payloads. It is declared, not authenticated: suitable for a
 single-owner self-hosted Vault, not a security boundary.
 
+## Duplicates
+
+A proposal whose lexical similarity (Jaccard over words and CJK bigrams of
+title, tags and body prefix) to any live knowledge is ≥ 0.5 is refused with the
+matching refs, so the agent corroborates instead. Retired (deprecated/archived)
+knowledge never blocks. The threshold is tentative: paraphrases measured 0.58
+(Japanese) and 0.78 (English); same-topic but different advice measured 0.27.
+
 ## Known limits
 
 - Two sessions of the same model can make correlated errors; enable

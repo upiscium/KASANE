@@ -18,7 +18,12 @@ import mcp_types as types
 from mcp.server import Server, ServerRequestContext
 
 from kasane.contracts import ContractViolationError, default_schema_dir, load_schema
-from kasane.trust import AgentContext, TrustRejectedError, TrustService
+from kasane.trust import (
+    AgentContext,
+    DuplicateKnowledgeError,
+    TrustRejectedError,
+    TrustService,
+)
 from kasane.trust.similar import find_similar
 
 TOOL_NAME = "kasane_retrieve"
@@ -43,9 +48,10 @@ WRITE_DESCRIPTIONS = {
         "Record reusable procedural knowledge you established in this session "
         "(a procedure, design approach, situational guidance, pitfall, or "
         "constraint) as a new candidate. Cite at least one source. State the "
-        "situation it applies to in the body. The result lists similar existing "
-        "knowledge: if one of them already says the same thing, corroborate it "
-        "next time instead of proposing a duplicate."
+        "situation it applies to in the body. Near-duplicates of existing "
+        "knowledge are refused with the matching refs (error near_duplicate): "
+        "corroborate the match instead. A successful result also lists related "
+        "knowledge."
     ),
     CORROBORATE_TOOL: (
         "Independently confirm that existing knowledge matches what you found "
@@ -184,6 +190,16 @@ def _retrieve(backend: RetrievalBackend, args: dict[str, Any]) -> types.CallTool
 def _propose(write: WriteAccess, args: dict[str, Any]) -> types.CallToolResult:
     try:
         result = write.service.propose(args, write.agent)
+    except DuplicateKnowledgeError as exc:
+        # Machine-readable so the agent can corroborate the match directly.
+        return _structured(
+            {
+                "error": "near_duplicate",
+                "message": str(exc),
+                "similar": [match.summary() for match in exc.matches],
+            },
+            is_error=True,
+        )
     except (ContractViolationError, TrustRejectedError) as exc:
         return _tool_error(f"proposal refused: {exc}")
     similar = find_similar(

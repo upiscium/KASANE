@@ -120,7 +120,7 @@ def test_full_intake_loop_over_mcp(env: Env) -> None:
     assert env.repository.get_knowledge(REF).status is KnowledgeStatus.VERIFIED
 
 
-def test_propose_returns_similar_existing_knowledge(env: Env) -> None:
+def test_near_duplicate_proposal_is_refused_with_matches(env: Env) -> None:
     env.call("author", PROPOSE_TOOL, proposal())
     near = env.call(
         "other",
@@ -130,8 +130,31 @@ def test_propose_returns_similar_existing_knowledge(env: Env) -> None:
             title="Rebuild the lexical index after schema changes",
         ),
     )
-    refs = [item["knowledge_ref"] for item in near.structured_content["similar"]]
-    assert refs == [REF]
+    assert near.is_error is True
+    assert near.structured_content["error"] == "near_duplicate"
+    assert [m["knowledge_ref"] for m in near.structured_content["similar"]] == [REF]
+    assert len(env.repository.list_knowledge()) == 1  # nothing created
+
+
+def test_related_proposal_is_created_with_hints(env: Env) -> None:
+    env.call("author", PROPOSE_TOOL, proposal())
+    related = env.call(
+        "other",
+        PROPOSE_TOOL,
+        proposal(
+            knowledge_ref="vault://project/kasane/procedures/migrate-index-in-place",
+            knowledge_type="design",
+            title="Migrate the index in place for small schema changes",
+            body=(
+                "For additive columns, ALTER the index table instead of "
+                "rebuilding; rebuild only on type changes."
+            ),
+        ),
+    )
+    assert related.is_error is False
+    hints = related.structured_content["similar"]
+    assert [m["knowledge_ref"] for m in hints] == [REF]
+    assert 0.25 <= hints[0]["score"] < 0.5
     unrelated = env.call(
         "other",
         PROPOSE_TOOL,

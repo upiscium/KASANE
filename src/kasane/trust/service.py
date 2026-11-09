@@ -31,15 +31,31 @@ from .policy import (
     TrustPolicyConfig,
     evaluate,
 )
+from .similar import SimilarKnowledge, find_similar
 
 PROPOSAL_SCHEMA = "knowledge-proposal.schema.json"
 SIGNAL_SCHEMA = "knowledge-signal.schema.json"
 DEFAULT_MAX_BODY_BYTES = 12_000
 _MAX_POLICY_STEPS = 4
+# Measured on paraphrases: reworded duplicates scored 0.58 (ja) / 0.78 (en);
+# same-topic different advice 0.27. Tentative until real data exists.
+DEFAULT_DUPLICATE_THRESHOLD = 0.5
 
 
 class TrustRejectedError(ValueError):
     """A write was refused; the Vault is unchanged."""
+
+
+class DuplicateKnowledgeError(TrustRejectedError):
+    """A proposal nearly duplicates live knowledge; corroborate that instead."""
+
+    def __init__(self, matches: list[SimilarKnowledge]) -> None:
+        self.matches = matches
+        refs = ", ".join(match.knowledge_ref for match in matches)
+        super().__init__(
+            f"near-duplicate of existing knowledge ({refs}); corroborate it "
+            "instead, or make the proposal distinct"
+        )
 
 
 @dataclass(frozen=True)
@@ -84,12 +100,16 @@ class TrustService:
         *,
         write_scopes: Sequence[str] | None = None,
         max_body_bytes: int = DEFAULT_MAX_BODY_BYTES,
+        duplicate_threshold: float = DEFAULT_DUPLICATE_THRESHOLD,
     ) -> None:
+        if not 0 < duplicate_threshold <= 1:
+            raise ValueError("duplicate_threshold must be in (0, 1]")
         self.repository = repository
         self.config = config or DEFAULT_POLICY
         # An empty list means "nowhere", not "everywhere".
         self.write_scopes = None if write_scopes is None else tuple(write_scopes)
         self.max_body_bytes = max_body_bytes
+        self.duplicate_threshold = duplicate_threshold
 
     # Agent operations -------------------------------------------------
 
@@ -107,6 +127,15 @@ class TrustService:
             raise TrustRejectedError(
                 f"{ref} already exists; corroborate it instead of re-proposing"
             )
+        duplicates = find_similar(
+            str(proposal["title"]),
+            [str(tag) for tag in proposal.get("tags", [])],
+            body,
+            self.repository.list_knowledge(),
+            threshold=self.duplicate_threshold,
+        )
+        if duplicates:
+            raise DuplicateKnowledgeError(duplicates)
         draft = KnowledgeDraft(
             knowledge_ref=ref,
             knowledge_type=str(proposal["knowledge_type"]),

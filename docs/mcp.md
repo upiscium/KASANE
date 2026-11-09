@@ -26,7 +26,7 @@ With `--allow-write`, four intake tools are added (trust rules: `docs/trust.md`)
 
 | Tool | Input | Effect |
 | --- | --- | --- |
-| `kasane_propose` | Knowledge Proposal v0.1 ([schema](../schemas/knowledge-proposal.schema.json)) | New T0 candidate; result lists similar existing knowledge |
+| `kasane_propose` | Knowledge Proposal v0.1 ([schema](../schemas/knowledge-proposal.schema.json)) | New T0 candidate; result lists related knowledge (score ≥ 0.25). Near-duplicates (≥ 0.5) are refused with `error: near_duplicate` and the matching refs |
 | `kasane_corroborate` | `knowledge_ref`, optional `note` | Independent confirmation |
 | `kasane_verify` | `knowledge_ref`, `verification` (`passed`/`failed`/`rejected`), `note` | Candidates only; never your own |
 | `kasane_report_outcome` | `knowledge_ref`, `outcome` (`success`/`failure`), `note` | After applying knowledge to a real task |

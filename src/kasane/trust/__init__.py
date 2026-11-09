@@ -10,12 +10,19 @@ from .policy import (
     TrustPolicyConfig,
     evaluate,
 )
-from .service import AgentContext, TrustRejectedError, TrustResult, TrustService
+from .service import (
+    AgentContext,
+    DuplicateKnowledgeError,
+    TrustRejectedError,
+    TrustResult,
+    TrustService,
+)
 
 __all__ = [
     "OPERATOR_ACTOR",
     "POLICY_ACTOR",
     "AgentContext",
+    "DuplicateKnowledgeError",
     "Participant",
     "PolicyAction",
     "Tier",
