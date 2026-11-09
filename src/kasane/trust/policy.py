@@ -127,8 +127,7 @@ def evaluate(
     config: TrustPolicyConfig | None = None,
 ) -> TrustAssessment:
     config = config or DEFAULT_POLICY
-    window, author, demoted_before = _current_window(events)
-    author_key = author.key if author else None
+    window, author, author_actor, demoted_before = _current_window(events)
 
     corroborators: list[Participant] = []
     verifiers: list[Participant] = []
@@ -141,24 +140,33 @@ def evaluate(
             revalidation_requested = True
             continue
         participant = participant_from_metadata(event.actor, event.metadata)
+        outcome = _metadata_str(event.metadata, "outcome")
+        is_failure = (
+            event.event_type is EventType.VERIFICATION_RECORDED
+            and outcome != VerificationOutcome.PASSED.value
+        ) or (event.event_type is EventType.OUTCOME_REPORTED and outcome == "failure")
+        if is_failure:
+            # Negative evidence counts from anyone, including operators and
+            # writers without an agent block; only positive evidence needs an
+            # independent agent.
+            failures.append(
+                participant or Participant(actor=event.actor, session="", model="")
+            )
+            continue
         if participant is None or participant.actor in RESERVED_ACTORS:
             continue
-        independent = participant.key != author_key
-        if event.event_type is EventType.CORROBORATED and independent:
+        if author is not None:
+            independent = participant.key != author.key
+        else:  # content written without agent metadata: exclude by actor
+            independent = participant.actor != author_actor
+        if not independent:
+            continue
+        if event.event_type is EventType.CORROBORATED:
             corroborators.append(participant)
         elif event.event_type is EventType.VERIFICATION_RECORDED:
-            outcome = _metadata_str(event.metadata, "outcome")
-            if outcome == VerificationOutcome.PASSED.value:
-                if independent:
-                    verifiers.append(participant)
-            else:
-                failures.append(participant)
-        elif event.event_type is EventType.OUTCOME_REPORTED:
-            outcome = _metadata_str(event.metadata, "outcome")
-            if outcome == "success" and independent:
-                successes.append(participant)
-            elif outcome == "failure":
-                failures.append(participant)
+            verifiers.append(participant)
+        elif event.event_type is EventType.OUTCOME_REPORTED and outcome == "success":
+            successes.append(participant)
 
     count = _independence_counter(author, config)
     n_corroborations = count(corroborators)
@@ -176,13 +184,16 @@ def evaluate(
         tier = Tier.T0
         if n_failures >= config.failures_to_retire:
             action = PolicyAction.ARCHIVE
-        elif n_failures == 0:
-            if (
-                verification_outcome is VerificationOutcome.PASSED
-                and n_verifications >= 1
+        elif n_failures == 0 and verification_outcome in (
+            None,
+            VerificationOutcome.PASSED,
+        ):
+            corroborated = n_corroborations >= config.corroborations_for_verified
+            if verification_outcome is VerificationOutcome.PASSED and (
+                n_verifications >= 1 or corroborated
             ):
                 action = PolicyAction.PROMOTE_VERIFIED
-            elif n_corroborations >= config.corroborations_for_verified:
+            elif corroborated:
                 action = PolicyAction.VERIFY_BY_CORROBORATION
     elif status is KnowledgeStatus.VERIFIED:
         if n_failures >= config.failures_to_retire:
@@ -218,15 +229,17 @@ def evaluate(
 
 def _current_window(
     events: Sequence[KnowledgeEvent],
-) -> tuple[Sequence[KnowledgeEvent], Participant | None, bool]:
+) -> tuple[Sequence[KnowledgeEvent], Participant | None, str | None, bool]:
     """Signals of the current trial, the content author, and prior demotion.
 
     The trial starts after the latest content change or demotion, whichever is
-    later. The author is always the latest content change's author.
+    later. The author is always the latest content change's author; when that
+    change carries no agent metadata, only its actor name is known.
     """
 
     start = 0
     author: Participant | None = None
+    author_actor: str | None = None
     demoted_before = False
     for index in range(len(events) - 1, -1, -1):
         event = events[index]
@@ -235,9 +248,10 @@ def _current_window(
             start = max(start, index + 1)
         elif event.event_type in CONTENT_EVENTS:
             author = participant_from_metadata(event.actor, event.metadata)
+            author_actor = event.actor
             start = max(start, index + 1)
             break
-    return events[start:], author, demoted_before
+    return events[start:], author, author_actor, demoted_before
 
 
 def _independence_counter(

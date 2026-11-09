@@ -66,6 +66,7 @@ class AgentContext:
 class TrustResult:
     record: KnowledgeRecord
     assessment: TrustAssessment
+    last_event_id: str | None = None
 
     def summary(self) -> dict[str, JsonValue]:
         return {
@@ -86,7 +87,8 @@ class TrustService:
     ) -> None:
         self.repository = repository
         self.config = config or DEFAULT_POLICY
-        self.write_scopes = tuple(write_scopes) if write_scopes else None
+        # An empty list means "nowhere", not "everywhere".
+        self.write_scopes = None if write_scopes is None else tuple(write_scopes)
         self.max_body_bytes = max_body_bytes
 
     # Agent operations -------------------------------------------------
@@ -133,6 +135,24 @@ class TrustService:
             raise TrustRejectedError(f"{ref} is {record.status.value}")
         kind = signal["kind"]
         note = signal.get("note")
+        try:
+            self._record_signal(record, agent, kind, signal, note)
+        except StaleRevisionError as error:
+            raise TrustRejectedError(
+                f"{ref} changed concurrently; re-read and retry"
+            ) from error
+        self._apply_policy(ref)
+        return self.assess(ref)
+
+    def _record_signal(
+        self,
+        record: KnowledgeRecord,
+        agent: AgentContext,
+        kind: str,
+        signal: Mapping[str, Any],
+        note: Any,
+    ) -> None:
+        ref = record.knowledge_ref
         if kind == "verification":
             self._verify(
                 record, agent, VerificationOutcome(signal["verification"]), note
@@ -155,20 +175,16 @@ class TrustService:
                 actor=agent.actor,
                 metadata=agent.metadata(**extra),
             )
-        self._apply_policy(ref)
-        return self.assess(ref)
 
     # Read side ---------------------------------------------------------
 
     def assess(self, knowledge_ref: str) -> TrustResult:
         record = self._get(knowledge_ref)
+        events = self.repository.list_events(knowledge_ref)
         assessment = evaluate(
-            record.status,
-            record.verification_outcome,
-            self.repository.list_events(knowledge_ref),
-            self.config,
+            record.status, record.verification_outcome, events, self.config
         )
-        return TrustResult(record, assessment)
+        return TrustResult(record, assessment, events[-1].event_id if events else None)
 
     def approval_queue(self) -> list[TrustResult]:
         results = [
@@ -186,12 +202,8 @@ class TrustService:
             raise TrustRejectedError(
                 f"{knowledge_ref} is not approval-eligible (T2 required)"
             )
-        self.repository.transition_lifecycle(
-            knowledge_ref,
-            KnowledgeStatus.CANONICAL,
-            expected_revision=current.record.revision,
-            actor=OPERATOR_ACTOR,
-            event_metadata={"decision": "approve", "note": note},
+        self._operator_transition(
+            current, KnowledgeStatus.CANONICAL, {"decision": "approve", "note": note}
         )
         return self.assess(knowledge_ref)
 
@@ -206,12 +218,8 @@ class TrustService:
                 f"{knowledge_ref} is not in the approval queue (T2 required); "
                 "use quarantine for emergencies"
             )
-        self.repository.transition_lifecycle(
-            knowledge_ref,
-            KnowledgeStatus.ARCHIVED,
-            expected_revision=current.record.revision,
-            actor=OPERATOR_ACTOR,
-            event_metadata={"decision": "reject", "reason": reason},
+        self._operator_transition(
+            current, KnowledgeStatus.ARCHIVED, {"decision": "reject", "reason": reason}
         )
         return self.assess(knowledge_ref)
 
@@ -227,12 +235,38 @@ class TrustService:
         for record in self.repository.list_knowledge():
             if record.status in (KnowledgeStatus.DEPRECATED, KnowledgeStatus.ARCHIVED):
                 continue
-            self._apply_policy(record.knowledge_ref)
-            if self._get(record.knowledge_ref).revision != record.revision:
+            if self._apply_policy(record.knowledge_ref):
                 changed.append(record.knowledge_ref)
         return changed
 
     # Internals ---------------------------------------------------------
+
+    def _operator_transition(
+        self,
+        current: TrustResult,
+        target: KnowledgeStatus,
+        metadata: dict[str, JsonValue],
+    ) -> None:
+        """Apply a human decision only if nothing happened since it was checked.
+
+        Signal events do not bump the revision, so the guard is on the last
+        event: a failure reported after the check invalidates the decision.
+        """
+
+        try:
+            self.repository.transition_lifecycle(
+                current.record.knowledge_ref,
+                target,
+                expected_revision=current.record.revision,
+                expected_last_event_id=current.last_event_id,
+                actor=OPERATOR_ACTOR,
+                event_metadata=metadata,
+            )
+        except StaleRevisionError as error:
+            raise TrustRejectedError(
+                f"{current.record.knowledge_ref} changed since it was checked; "
+                "re-check the approval queue"
+            ) from error
 
     def _verify(
         self,
@@ -257,14 +291,18 @@ class TrustService:
             event_metadata=agent.metadata(),
         )
 
-    def _apply_policy(self, knowledge_ref: str) -> None:
+    def _apply_policy(self, knowledge_ref: str) -> bool:
+        """Drive the record to its policy state; return whether anything changed."""
+
+        acted = False
         for _ in range(_MAX_POLICY_STEPS):
             current = self.assess(knowledge_ref)
             action = current.assessment.action
             if action is PolicyAction.NONE:
-                return
+                return acted
             try:
                 self._perform(current, action)
+                acted = True
             except StaleRevisionError:
                 continue  # another writer moved first; re-evaluate
         raise RuntimeError(f"trust policy did not settle for {knowledge_ref}")
@@ -272,6 +310,7 @@ class TrustService:
     def _perform(self, current: TrustResult, action: PolicyAction) -> None:
         record, assessment = current.record, current.assessment
         ref, revision = record.knowledge_ref, record.revision
+        last_event = current.last_event_id
         evidence: dict[str, JsonValue] = {
             "policy": action.value,
             "assessment": dict(assessment.summary()),
@@ -280,18 +319,25 @@ class TrustService:
             self.repository.record_verification(
                 ref,
                 expected_revision=revision,
+                expected_last_event_id=last_event,
                 actor=POLICY_ACTOR,
                 outcome=VerificationOutcome.PASSED,
                 verification={"basis": "corroboration", **evidence},
             )
-            record = self._get(ref)
-            revision = record.revision
+            # Chain to promotion only if our verification is still the last
+            # event; otherwise the next policy pass re-evaluates.
+            refreshed = self.assess(ref)
+            events = self.repository.list_events(ref)
+            if not events or events[-1].actor != POLICY_ACTOR:
+                raise StaleRevisionError(ref)
+            revision, last_event = refreshed.record.revision, refreshed.last_event_id
             action = PolicyAction.PROMOTE_VERIFIED
         if action is PolicyAction.PROMOTE_VERIFIED:
             self.repository.transition_lifecycle(
                 ref,
                 KnowledgeStatus.VERIFIED,
                 expected_revision=revision,
+                expected_last_event_id=last_event,
                 actor=POLICY_ACTOR,
                 event_metadata=evidence,
             )
@@ -300,6 +346,7 @@ class TrustService:
                 ref,
                 EventType.REVALIDATION_REQUESTED,
                 expected_revision=revision,
+                expected_last_event_id=last_event,
                 actor=POLICY_ACTOR,
                 metadata=evidence,
             )
@@ -308,6 +355,7 @@ class TrustService:
                 ref,
                 KnowledgeStatus.CANDIDATE,
                 expected_revision=revision,
+                expected_last_event_id=last_event,
                 actor=POLICY_ACTOR,
                 event_metadata=evidence,
             )
@@ -316,6 +364,7 @@ class TrustService:
                 ref,
                 KnowledgeStatus.DEPRECATED,
                 expected_revision=revision,
+                expected_last_event_id=last_event,
                 actor=POLICY_ACTOR,
                 event_metadata=evidence,
             )
@@ -324,6 +373,7 @@ class TrustService:
                 ref,
                 KnowledgeStatus.ARCHIVED,
                 expected_revision=revision,
+                expected_last_event_id=last_event,
                 actor=POLICY_ACTOR,
                 event_metadata=evidence,
             )

@@ -267,3 +267,110 @@ def test_verified_failures_demote_to_candidate_then_archive(
     fail("f3")
     archived = fail("f4")
     assert archived.record.status is KnowledgeStatus.ARCHIVED
+
+
+# Regression tests for independent review findings on PR #43 -----------------
+
+
+def _raw_failure(service: TrustService, session: str) -> None:
+    record = service.repository.get_knowledge(REF)
+    service.repository.record_signal_event(
+        REF,
+        EventType.OUTCOME_REPORTED,
+        expected_revision=record.revision,
+        actor="opencode",
+        metadata=agent(session).metadata(outcome="failure", note="raced"),
+    )
+
+
+def test_approve_refuses_when_failure_lands_after_check(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    service = TrustService(VaultRepository(tmp_path / "vault.db"))
+    _to_t2(service)
+    original = service.assess
+
+    def racing(ref: str) -> Any:
+        checked = original(ref)
+        _raw_failure(service, "late-failure")  # lands between check and write
+        return checked
+
+    monkeypatch.setattr(service, "assess", racing)
+    with pytest.raises(TrustRejectedError, match="changed since it was checked"):
+        service.approve(REF)
+    monkeypatch.undo()
+    assert service.assess(REF).record.status is KnowledgeStatus.VERIFIED
+
+
+def test_reconcile_reports_signal_only_policy_actions(tmp_path: Path) -> None:
+    service = TrustService(VaultRepository(tmp_path / "vault.db"))
+    _to_t2(service)
+    service.approve(REF)
+    _raw_failure(service, "f1")  # recorded without running the policy
+    assert service.reconcile() == [REF]
+    assert service.assess(REF).assessment.revalidation_requested
+    assert service.reconcile() == []
+
+
+def test_operator_failed_verification_blocks_corroboration_path(
+    service: TrustService,
+) -> None:
+    from kasane.vault.models import VerificationOutcome
+
+    service.propose(proposal(), AUTHOR)
+    record = service.repository.get_knowledge(REF)
+    service.repository.record_verification(
+        REF,
+        expected_revision=record.revision,
+        actor="operator",
+        outcome=VerificationOutcome.FAILED,
+        verification={"note": "wrong"},
+    )
+    service.signal(signal("corroboration"), agent("a"))
+    result = service.signal(signal("corroboration"), agent("b"))
+    assert result.record.status is KnowledgeStatus.CANDIDATE
+    assert result.record.verification_outcome is VerificationOutcome.FAILED
+    assert result.assessment.failures == 1
+
+
+def test_author_without_agent_metadata_is_excluded_by_actor(
+    service: TrustService,
+) -> None:
+    from kasane.vault.models import KnowledgeDraft
+
+    service.repository.create_candidate(
+        KnowledgeDraft(
+            knowledge_ref=REF,
+            knowledge_type="procedure",
+            title="Legacy",
+            body="Written before the trust service existed.",
+        ),
+        actor="opencode",
+    )
+    service.signal(signal("corroboration"), agent("a", actor="opencode"))
+    service.signal(signal("corroboration"), agent("b", actor="opencode"))
+    assert service.assess(REF).assessment.corroborations == 0
+    service.signal(signal("corroboration"), agent("c", actor="claude"))
+    result = service.signal(signal("corroboration"), agent("d", actor="codex"))
+    assert result.record.status is KnowledgeStatus.VERIFIED
+
+
+def test_empty_write_scopes_allow_nothing(tmp_path: Path) -> None:
+    service = TrustService(VaultRepository(tmp_path / "vault.db"), write_scopes=[])
+    with pytest.raises(TrustRejectedError, match="write scopes"):
+        service.propose(proposal(), AUTHOR)
+
+
+def test_concurrent_signal_surfaces_as_trust_rejection(
+    service: TrustService, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from kasane.vault.errors import StaleRevisionError
+
+    service.propose(proposal(), AUTHOR)
+
+    def stale(*args: Any, **kwargs: Any) -> Any:
+        raise StaleRevisionError(REF)
+
+    monkeypatch.setattr(service.repository, "record_signal_event", stale)
+    with pytest.raises(TrustRejectedError, match="concurrently"):
+        service.signal(signal("corroboration"), agent("a"))

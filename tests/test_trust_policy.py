@@ -176,3 +176,34 @@ def test_content_update_clears_prior_demotion() -> None:
         ev(EventType.OUTCOME_REPORTED, session="f2", outcome="failure"),
     ]
     assert evaluate(V, None, events).action is PolicyAction.DEMOTE
+
+
+def test_failures_count_without_agent_metadata_and_from_operator() -> None:
+    no_agent = KnowledgeEvent(
+        "id",
+        REF,
+        2,
+        "operator",
+        "t",
+        EventType.VERIFICATION_RECORDED,
+        {"outcome": "failed"},
+    )
+    events = [
+        created(),
+        no_agent,
+        ev(EventType.CORROBORATED, session="a"),
+        ev(EventType.CORROBORATED, session="b"),
+    ]
+    result = evaluate(C, VerificationOutcome.FAILED, events)
+    assert (result.failures, result.action) == (1, PolicyAction.NONE)
+
+
+def test_policy_verification_then_retry_promotes_without_reverifying() -> None:
+    events = [
+        created(),
+        ev(EventType.CORROBORATED, session="a"),
+        ev(EventType.CORROBORATED, session="b"),
+        ev(EventType.VERIFICATION_RECORDED, actor="policy", outcome="passed"),
+    ]
+    result = evaluate(C, VerificationOutcome.PASSED, events)
+    assert result.action is PolicyAction.PROMOTE_VERIFIED

@@ -261,6 +261,7 @@ class VaultRepository:
         outcome: VerificationOutcome,
         verification: JsonValue,
         event_metadata: JsonValue = None,
+        expected_last_event_id: str | None = None,
     ) -> KnowledgeRecord:
         parse_knowledge_ref(knowledge_ref)
         verification_value = require_json(verification)
@@ -269,6 +270,7 @@ class VaultRepository:
             current = self._require_current(
                 connection, knowledge_ref, expected_revision
             )
+            self._require_last_event(connection, knowledge_ref, expected_last_event_id)
             if current["status"] != KnowledgeStatus.CANDIDATE.value:
                 raise InvalidLifecycleTransitionError(
                     "verification requires candidate knowledge"
@@ -317,6 +319,7 @@ class VaultRepository:
         expected_revision: int,
         actor: str,
         event_metadata: JsonValue = None,
+        expected_last_event_id: str | None = None,
     ) -> KnowledgeRecord:
         parse_knowledge_ref(knowledge_ref)
         timestamp = self._clock()
@@ -324,6 +327,7 @@ class VaultRepository:
             current = self._require_current(
                 connection, knowledge_ref, expected_revision
             )
+            self._require_last_event(connection, knowledge_ref, expected_last_event_id)
             source = KnowledgeStatus(current["status"])
             if (
                 source is KnowledgeStatus.CANDIDATE
@@ -377,6 +381,7 @@ class VaultRepository:
         expected_revision: int,
         actor: str,
         metadata: JsonValue = None,
+        expected_last_event_id: str | None = None,
     ) -> KnowledgeEvent:
         if event_type not in SIGNAL_EVENT_TYPES:
             raise ValueError("only non-lifecycle signal events are accepted")
@@ -385,6 +390,7 @@ class VaultRepository:
         event_id = self._event_id_factory()
         with self._transaction() as connection:
             self._require_current(connection, knowledge_ref, expected_revision)
+            self._require_last_event(connection, knowledge_ref, expected_last_event_id)
             self._append_event(
                 connection,
                 knowledge_ref=knowledge_ref,
@@ -445,6 +451,34 @@ class VaultRepository:
                 f"{knowledge_ref}: expected revision {expected_revision}, current {row['revision']}"
             )
         return row
+
+    def _require_last_event(
+        self,
+        connection: sqlite3.Connection,
+        knowledge_ref: str,
+        expected_last_event_id: str | None,
+    ) -> None:
+        """Fail if any event was appended after the caller's view of the log.
+
+        Signal events do not bump the record revision, so decisions based on
+        the event log need this stronger precondition.
+        """
+
+        if expected_last_event_id is None:
+            return
+        row = connection.execute(
+            """
+            SELECT event_id FROM knowledge_events
+            WHERE knowledge_ref = ?
+            ORDER BY event_sequence DESC LIMIT 1
+            """,
+            (knowledge_ref,),
+        ).fetchone()
+        current = None if row is None else row["event_id"]
+        if current != expected_last_event_id:
+            raise StaleRevisionError(
+                f"{knowledge_ref}: event log changed since it was read"
+            )
 
     def _append_event(
         self,
