@@ -374,3 +374,84 @@ def test_concurrent_signal_surfaces_as_trust_rejection(
     monkeypatch.setattr(service.repository, "record_signal_event", stale)
     with pytest.raises(TrustRejectedError, match="concurrently"):
         service.signal(signal("corroboration"), agent("a"))
+
+
+def test_policy_contention_is_best_effort_and_reconcile_converges(
+    service: TrustService, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    service.propose(proposal(), AUTHOR)
+    service.signal(signal("corroboration"), agent("a"))
+    original = service.assess
+    counter = iter(range(1000))
+
+    def contended(ref: str) -> Any:
+        checked = original(ref)
+        record = service.repository.get_knowledge(ref)
+        service.repository.record_signal_event(  # another agent always slips in
+            ref,
+            EventType.CORROBORATED,
+            expected_revision=record.revision,
+            actor="other",
+            metadata=agent(f"c{next(counter)}", actor="other").metadata(),
+        )
+        return checked
+
+    monkeypatch.setattr(service, "assess", contended)
+    result = service.signal(signal("corroboration"), agent("b"))  # must not raise
+    monkeypatch.undo()
+    assert result.record.status is KnowledgeStatus.CANDIDATE  # guard held
+    assert service.reconcile() == [REF]
+    assert service.assess(REF).record.status is KnowledgeStatus.VERIFIED
+
+
+def test_retiring_actions_do_not_starve_under_contention(
+    service: TrustService, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    service.propose(proposal(), AUTHOR)
+    service.signal(signal("outcome", outcome="failure", note="no"), agent("f1"))
+    original = service.assess
+
+    def contended(ref: str) -> Any:
+        checked = original(ref)
+        record = service.repository.get_knowledge(ref)
+        service.repository.record_signal_event(
+            ref,
+            EventType.CORROBORATED,
+            expected_revision=record.revision,
+            actor="other",
+            metadata=agent("busy", actor="other").metadata(),
+        )
+        return checked
+
+    monkeypatch.setattr(service, "assess", contended)
+    result = service.signal(
+        signal("outcome", outcome="failure", note="no"), agent("f2")
+    )
+    monkeypatch.undo()
+    assert service.assess(REF).record.status is KnowledgeStatus.ARCHIVED
+    assert result is not None
+
+
+def test_reconcile_reports_committed_verification_even_if_promotion_blocked(
+    service: TrustService,
+) -> None:
+    service.propose(proposal(), AUTHOR)
+    for session in ("a", "b"):
+        record = service.repository.get_knowledge(REF)
+        service.repository.record_signal_event(
+            REF,
+            EventType.CORROBORATED,
+            expected_revision=record.revision,
+            actor="opencode",
+            metadata=agent(session).metadata(),
+        )
+    original = service.repository.record_verification
+
+    def verify_then_fail(*args: Any, **kwargs: Any) -> Any:
+        committed = original(*args, **kwargs)
+        _raw_failure(service, "late")  # lands right after the policy verification
+        return committed
+
+    service.repository.record_verification = verify_then_fail  # type: ignore[method-assign]
+    assert service.reconcile() == [REF]
+    assert service.assess(REF).record.status is KnowledgeStatus.CANDIDATE

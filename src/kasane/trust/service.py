@@ -292,25 +292,37 @@ class TrustService:
         )
 
     def _apply_policy(self, knowledge_ref: str) -> bool:
-        """Drive the record to its policy state; return whether anything changed."""
+        """Drive the record toward its policy state; return whether anything changed.
+
+        Best effort: under sustained contention the loop stops without raising,
+        because the caller's own write has already committed. The next signal or
+        ``reconcile()`` finishes the job, since the policy is deterministic.
+        """
 
         acted = False
         for _ in range(_MAX_POLICY_STEPS):
             current = self.assess(knowledge_ref)
             action = current.assessment.action
             if action is PolicyAction.NONE:
-                return acted
+                break
             try:
-                self._perform(current, action)
-                acted = True
+                acted = self._perform(current, action) or acted
             except StaleRevisionError:
                 continue  # another writer moved first; re-evaluate
-        raise RuntimeError(f"trust policy did not settle for {knowledge_ref}")
+        return acted
 
-    def _perform(self, current: TrustResult, action: PolicyAction) -> None:
+    def _perform(self, current: TrustResult, action: PolicyAction) -> bool:
+        """Apply one policy action; return True once anything was committed.
+
+        Advancing actions (verify, promote) are guarded on the exact event log
+        they were decided from, because any later failure must block them.
+        Retiring actions (revalidate, demote, archive, deprecate) are monotone
+        in failures: later events cannot invalidate them, so they are guarded
+        on revision only and do not starve under signal contention.
+        """
+
         record, assessment = current.record, current.assessment
         ref, revision = record.knowledge_ref, record.revision
-        last_event = current.last_event_id
         evidence: dict[str, JsonValue] = {
             "policy": action.value,
             "assessment": dict(assessment.summary()),
@@ -319,64 +331,47 @@ class TrustService:
             self.repository.record_verification(
                 ref,
                 expected_revision=revision,
-                expected_last_event_id=last_event,
+                expected_last_event_id=current.last_event_id,
                 actor=POLICY_ACTOR,
                 outcome=VerificationOutcome.PASSED,
                 verification={"basis": "corroboration", **evidence},
             )
-            # Chain to promotion only if our verification is still the last
-            # event; otherwise the next policy pass re-evaluates.
-            refreshed = self.assess(ref)
-            events = self.repository.list_events(ref)
-            if not events or events[-1].actor != POLICY_ACTOR:
-                raise StaleRevisionError(ref)
-            revision, last_event = refreshed.record.revision, refreshed.last_event_id
-            action = PolicyAction.PROMOTE_VERIFIED
+            # Committed. Promotion is a separate decision for the next pass,
+            # which re-reads the log (PROMOTE_VERIFIED fires on PASSED +
+            # corroboration threshold) and is itself guarded.
+            return True
         if action is PolicyAction.PROMOTE_VERIFIED:
             self.repository.transition_lifecycle(
                 ref,
                 KnowledgeStatus.VERIFIED,
                 expected_revision=revision,
-                expected_last_event_id=last_event,
+                expected_last_event_id=current.last_event_id,
                 actor=POLICY_ACTOR,
                 event_metadata=evidence,
             )
-        elif action is PolicyAction.REQUEST_REVALIDATION:
+            return True
+        if action is PolicyAction.REQUEST_REVALIDATION:
             self.repository.record_signal_event(
                 ref,
                 EventType.REVALIDATION_REQUESTED,
                 expected_revision=revision,
-                expected_last_event_id=last_event,
                 actor=POLICY_ACTOR,
                 metadata=evidence,
             )
-        elif action is PolicyAction.DEMOTE:
-            self.repository.transition_lifecycle(
-                ref,
-                KnowledgeStatus.CANDIDATE,
-                expected_revision=revision,
-                expected_last_event_id=last_event,
-                actor=POLICY_ACTOR,
-                event_metadata=evidence,
-            )
-        elif action is PolicyAction.DEPRECATE:
-            self.repository.transition_lifecycle(
-                ref,
-                KnowledgeStatus.DEPRECATED,
-                expected_revision=revision,
-                expected_last_event_id=last_event,
-                actor=POLICY_ACTOR,
-                event_metadata=evidence,
-            )
-        elif action is PolicyAction.ARCHIVE:
-            self.repository.transition_lifecycle(
-                ref,
-                KnowledgeStatus.ARCHIVED,
-                expected_revision=revision,
-                expected_last_event_id=last_event,
-                actor=POLICY_ACTOR,
-                event_metadata=evidence,
-            )
+            return True
+        targets = {
+            PolicyAction.DEMOTE: KnowledgeStatus.CANDIDATE,
+            PolicyAction.DEPRECATE: KnowledgeStatus.DEPRECATED,
+            PolicyAction.ARCHIVE: KnowledgeStatus.ARCHIVED,
+        }
+        self.repository.transition_lifecycle(
+            ref,
+            targets[action],
+            expected_revision=revision,
+            actor=POLICY_ACTOR,
+            event_metadata=evidence,
+        )
+        return True
 
     def _require_writable(self, knowledge_ref: str) -> None:
         identity = parse_knowledge_ref(knowledge_ref)
