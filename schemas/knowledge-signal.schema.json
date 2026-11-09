@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://agentknowledgevault.dev/schemas/v0.1/knowledge-signal.schema.json",
+  "$id": "urn:kasane:schema:v0.1:knowledge-signal",
   "title": "KASANE Knowledge Signal v0.1",
   "description": "Trust evidence an agent attaches to existing knowledge (see #40). The signalling agent's identity comes from server configuration.",
   "type": "object",

@@ -25,8 +25,8 @@ lookup.
 
 The former `agentknowledgevault` import package was removed without a
 compatibility shim: it was never published and had no external consumers.
-Persisted vault data, `vault://` knowledge references, and the v0.1 schema `$id`
-values are unchanged.
+Schema `$id` values are URNs (`urn:kasane:schema:v0.1:<name>`): identifiers,
+not fetchable URLs, so they do not depend on owning any domain.
 
 ## Development
 

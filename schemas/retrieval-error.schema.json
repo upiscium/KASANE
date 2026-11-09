@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://agentknowledgevault.dev/schemas/v0.1/retrieval-error.schema.json",
+  "$id": "urn:kasane:schema:v0.1:retrieval-error",
   "title": "Retrieval Protocol Error v0.1",
   "description": "A bounded protocol error returned instead of a Context Capsule when the request cannot represent one within its selected hard boundary.",
   "type": "object",

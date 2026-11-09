@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://agentknowledgevault.dev/schemas/v0.1/knowledge-proposal.schema.json",
+  "$id": "urn:kasane:schema:v0.1:knowledge-proposal",
   "title": "KASANE Knowledge Proposal v0.1",
   "description": "Agent-authored knowledge submitted as a T0 candidate (see #40). Identity of the proposing agent comes from server configuration, never from this payload. Situation conditions (applies_when/counterconditions) are not accepted until conditional retrieval (#42) defines their grammar; state the situation in the body meanwhile.",
   "type": "object",
