@@ -232,3 +232,83 @@ def test_serve_write_requires_identity(
     with pytest.raises(SystemExit) as raised:
         cli_main(["serve", "--vault", str(vault), *extra])
     assert raised.value.code == 2
+
+
+# Regression tests for independent review findings on PR #44 -----------------
+
+
+def test_signal_tools_cannot_override_kind(env: Env) -> None:
+    env.call("author", PROPOSE_TOOL, proposal())
+    smuggled = env.call(
+        "a",
+        "kasane_corroborate",
+        {
+            "knowledge_ref": REF,
+            "kind": "verification",
+            "verification": "passed",
+            "note": "sneaky",
+        },
+    )
+    assert smuggled.is_error is True
+    events = [e.event_type.value for e in env.repository.list_events(REF)]
+    assert "VERIFICATION_RECORDED" not in events
+    assert env.repository.get_knowledge(REF).status is KnowledgeStatus.CANDIDATE
+
+
+@pytest.mark.parametrize(
+    "bad_ref",
+    ["vault://project/onlyowner", "vault://global/a b", "vault://private/x//y"],
+)
+def test_malformed_refs_are_tool_errors(env: Env, bad_ref: str) -> None:
+    proposed = env.call("author", PROPOSE_TOOL, proposal(knowledge_ref=bad_ref))
+    assert proposed.is_error is True
+    signalled = env.call("a", "kasane_corroborate", {"knowledge_ref": bad_ref})
+    assert signalled.is_error is True
+    assert env.repository.list_knowledge() == []
+
+
+def test_similarity_never_crosses_write_scopes(tmp_path: Path) -> None:
+    repository = VaultRepository(tmp_path / "vault.db")
+    retrieval = Level0RetrievalService(repository, tmp_path / "index.db")
+    secret = proposal(
+        knowledge_ref="vault://private/alice/secret-runbook",
+        title="Rotate the prod database root password",
+        body="Use the vault CLI, then restart the replicas one by one.",
+    )
+    TrustService(repository).propose(secret, AgentContext("alice", "s", "m1"))
+
+    scoped = TrustService(repository, write_scopes=["project/kasane"])
+    agent = AgentContext(actor="opencode", session="p", model="m1")
+    server = build_server(retrieval, write=WriteAccess(scoped, agent))
+    same_text = {**secret, "knowledge_ref": "vault://project/kasane/procedures/rotate"}
+
+    async def run() -> Any:
+        async with Client(server) as client:
+            return await client.call_tool(PROPOSE_TOOL, same_text)
+
+    result = anyio.run(run)
+    assert result.is_error is False  # not blocked by an out-of-scope record
+    assert result.structured_content["similar"] == []  # and nothing disclosed
+    assert "alice" not in result.content[0].text
+
+
+def test_empty_scope_env_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    vault = tmp_path / "vault.db"
+    VaultRepository(vault)
+    monkeypatch.setenv("KASANE_WRITE_SCOPES", " , ")
+    with pytest.raises(SystemExit) as raised:
+        cli_main(
+            [
+                "serve",
+                "--vault",
+                str(vault),
+                "--allow-write",
+                "--actor",
+                "a",
+                "--model",
+                "m",
+            ]
+        )
+    assert raised.value.code == 2

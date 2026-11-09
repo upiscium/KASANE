@@ -108,8 +108,16 @@ def _write_access(
     except ValueError as exc:
         parser.exit(2, f"kasane-mcp: {exc}\n")
     scopes = args.write_scopes
-    if scopes is None and (env_scopes := os.environ.get(SCOPES_ENV)):
+    env_scopes = os.environ.get(SCOPES_ENV)
+    if scopes is None and env_scopes is not None:
         scopes = [scope.strip() for scope in env_scopes.split(",") if scope.strip()]
+        if not scopes:
+            # Ambiguous: an empty value must not silently mean "everywhere".
+            parser.exit(
+                2,
+                f"kasane-mcp: {SCOPES_ENV} is set but empty; unset it to allow "
+                "all namespaces or list at least one scope\n",
+            )
     return WriteAccess(TrustService(repository, write_scopes=scopes), agent)
 
 

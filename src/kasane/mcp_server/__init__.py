@@ -9,12 +9,14 @@ Agent identity (actor, session, model) comes from server configuration.
 from __future__ import annotations
 
 import json
+import sqlite3
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
 import mcp_types as types
+from jsonschema import Draft202012Validator
 from mcp.server import Server, ServerRequestContext
 
 from kasane.contracts import ContractViolationError, default_schema_dir, load_schema
@@ -24,7 +26,6 @@ from kasane.trust import (
     TrustRejectedError,
     TrustService,
 )
-from kasane.trust.similar import find_similar
 
 TOOL_NAME = "kasane_retrieve"
 PROPOSE_TOOL = "kasane_propose"
@@ -152,7 +153,7 @@ def build_server(
             (VERIFY_TOOL, "verification"),
             (OUTCOME_TOOL, "outcome"),
         ):
-            handlers[name] = _signal_handler(write, kind)
+            handlers[name] = _signal_handler(write, kind, schemas[name])
 
     async def list_tools(
         ctx: ServerRequestContext[Any], params: types.PaginatedRequestParams | None
@@ -190,6 +191,8 @@ def _retrieve(backend: RetrievalBackend, args: dict[str, Any]) -> types.CallTool
 def _propose(write: WriteAccess, args: dict[str, Any]) -> types.CallToolResult:
     try:
         result = write.service.propose(args, write.agent)
+    except sqlite3.Error as exc:
+        return _tool_error(f"vault unavailable, retry later: {exc}")
     except DuplicateKnowledgeError as exc:
         # Machine-readable so the agent can corroborate the match directly.
         return _structured(
@@ -202,11 +205,10 @@ def _propose(write: WriteAccess, args: dict[str, Any]) -> types.CallToolResult:
         )
     except (ContractViolationError, TrustRejectedError) as exc:
         return _tool_error(f"proposal refused: {exc}")
-    similar = find_similar(
+    similar = write.service.similar(
         result.record.title,
         result.record.tags,
         result.record.body,
-        write.service.repository.list_knowledge(),
         exclude_ref=result.record.knowledge_ref,
     )
     payload = {
@@ -217,12 +219,21 @@ def _propose(write: WriteAccess, args: dict[str, Any]) -> types.CallToolResult:
 
 
 def _signal_handler(
-    write: WriteAccess, kind: str
+    write: WriteAccess, kind: str, schema: dict[str, Any]
 ) -> Callable[[dict[str, Any]], types.CallToolResult]:
+    # The SDK does not enforce input schemas over stdio, so validate here:
+    # otherwise a caller could pass `kind` and turn one tool into another.
+    validator = Draft202012Validator(schema)
+
     def handle(args: dict[str, Any]) -> types.CallToolResult:
-        signal = {"schema_version": "0.1", "kind": kind, **args}
+        errors = sorted(validator.iter_errors(args), key=lambda e: list(e.path))
+        if errors:
+            return _tool_error(f"{kind} refused: {errors[0].message}")
+        signal = {**args, "schema_version": "0.1", "kind": kind}
         try:
             result = write.service.signal(signal, write.agent)
+        except sqlite3.Error as exc:
+            return _tool_error(f"vault unavailable, retry later: {exc}")
         except (ContractViolationError, TrustRejectedError) as exc:
             return _tool_error(f"{kind} refused: {exc}")
         return _structured(result.summary())

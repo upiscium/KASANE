@@ -50,6 +50,16 @@ uv run kasane-mcp serve --vault ~/.local/state/kasane/vault.db \
   --allow-write --actor opencode --model <model-id> --write-scope project/kasane
 ```
 
+**Independence and sessions:** without `--session`, every server process is a
+new session, so an agent that restarts its MCP server counts as a *different*
+independent participant and can corroborate its own earlier proposal. This is
+the accepted weak-independence risk of #40; pin `--session` per agent, and
+enable `require_distinct_models` once several models write.
+
+**Scopes:** `--write-scope` also bounds duplicate checks and `similar` hints, so
+a scoped writer never sees or is blocked by knowledge outside its scopes.
+Omitting it allows writes to every namespace, including `private/*`.
+
 **Before enabling writes in real use:** there is no emergency stop until
 `kasane-admin freeze`/`quarantine` lands, and `kasane_retrieve` still serves only
 canonical knowledge, so agents cannot yet discover candidates except through
