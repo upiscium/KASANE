@@ -13,8 +13,9 @@ import anyio
 from mcp.server.stdio import stdio_server
 
 from kasane.mcp_server import WriteAccess, build_server
+from kasane.retrieval.request import parse_retrieval_request
 from kasane.retrieval.service import Level0RetrievalService
-from kasane.trust import AgentContext, TrustService
+from kasane.trust import AgentContext, TrustPolicyConfig, TrustService
 from kasane.vault.repository import VaultRepository
 
 VAULT_ENV = "KASANE_VAULT_PATH"
@@ -23,6 +24,7 @@ ACTOR_ENV = "KASANE_ACTOR"
 MODEL_ENV = "KASANE_MODEL"
 SESSION_ENV = "KASANE_SESSION"
 SCOPES_ENV = "KASANE_WRITE_SCOPES"
+DEFAULT_SCOPES_ENV = "KASANE_DEFAULT_SCOPES"
 DEFAULT_FIXTURE = (
     Path(__file__).resolve().parents[3] / "evaluation/level0/knowledge-fixture.json"
 )
@@ -35,6 +37,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     serve = commands.add_parser("serve", help="run the MCP server over stdio")
     serve.add_argument("--vault", default=os.environ.get(VAULT_ENV))
     serve.add_argument("--index", default=os.environ.get(INDEX_ENV))
+    serve.add_argument(
+        "--default-scope",
+        action="append",
+        dest="default_scopes",
+        help="scope used when a retrieve request omits it (repeatable), "
+        "e.g. global and project/kasane",
+    )
     serve.add_argument(
         "--allow-write",
         action="store_true",
@@ -73,10 +82,16 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     vault = _require_vault(parser, args.vault)
     repository = VaultRepository(vault)
-    service = Level0RetrievalService(repository, args.index)
+    # One policy config for retrieval labels and intake, so T2 means the
+    # same thing in capsules and in the approval queue.
+    policy = TrustPolicyConfig()
+    service = Level0RetrievalService(repository, args.index, trust_policy=policy)
     service.rebuild_index()
-    write = _write_access(parser, args, repository) if args.allow_write else None
-    server = build_server(service, write=write)
+    write = (
+        _write_access(parser, args, repository, policy) if args.allow_write else None
+    )
+    default_scope = _default_scope(parser, args.default_scopes)
+    server = build_server(service, write=write, default_scope=default_scope)
 
     async def run() -> None:
         async with stdio_server() as (read_stream, write_stream):
@@ -88,10 +103,34 @@ def main(argv: Sequence[str] | None = None) -> int:
     return 0
 
 
+def _default_scope(
+    parser: argparse.ArgumentParser, values: list[str] | None
+) -> list[str] | None:
+    if values is None and (env := os.environ.get(DEFAULT_SCOPES_ENV)) is not None:
+        values = [value.strip() for value in env.split(",") if value.strip()]
+        if not values:
+            parser.exit(2, f"kasane-mcp: {DEFAULT_SCOPES_ENV} is set but empty\n")
+    if not values:
+        return None
+    probe = {
+        "schema_version": "0.1",
+        "query": "probe",
+        "mode": "fast",
+        "scope": values,
+        "budget": {"max_tokens": 1, "max_bytes": 1, "max_evidence_items": 1},
+    }
+    try:
+        parse_retrieval_request(probe)  # fail at startup, not on every call
+    except ValueError as exc:
+        parser.exit(2, f"kasane-mcp: invalid --default-scope: {exc}\n")
+    return values
+
+
 def _write_access(
     parser: argparse.ArgumentParser,
     args: argparse.Namespace,
     repository: VaultRepository,
+    policy: TrustPolicyConfig,
 ) -> WriteAccess:
     if not args.actor or not args.model:
         parser.exit(
@@ -118,7 +157,7 @@ def _write_access(
                 f"kasane-mcp: {SCOPES_ENV} is set but empty; unset it to allow "
                 "all namespaces or list at least one scope\n",
             )
-    return WriteAccess(TrustService(repository, write_scopes=scopes), agent)
+    return WriteAccess(TrustService(repository, policy, write_scopes=scopes), agent)
 
 
 def _require_vault(parser: argparse.ArgumentParser, value: str | None) -> Path:

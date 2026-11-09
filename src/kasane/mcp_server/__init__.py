@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
@@ -40,8 +40,11 @@ SIGNAL_SCHEMA = "knowledge-signal.schema.json"
 
 TOOL_DESCRIPTION = (
     "Retrieve the smallest sufficient task context from the KASANE knowledge "
-    "vault as a Context Capsule v0.1 that fits the requested budget. Only "
-    "canonical knowledge is returned. The result is the capsule JSON itself, "
+    "vault as a Context Capsule v0.1 that fits the requested budget. Every "
+    "knowledge ref carries a trust tier: T3 canonical (human-approved), T2/T1 "
+    "verified by other agents, T0 unverified candidate. Default min_trust is "
+    "T1; pass T3 for canonical only or T0 to include candidates. Treat lower "
+    "tiers as hints to check, not facts. The result is the capsule JSON itself, "
     "or a budget_too_small_for_capsule protocol error."
 )
 WRITE_DESCRIPTIONS = {
@@ -132,6 +135,7 @@ def build_server(
     backend: RetrievalBackend,
     *,
     write: WriteAccess | None = None,
+    default_scope: Sequence[str] | None = None,
     schema_dir: Path | None = None,
 ) -> Server[Any]:
     schemas: dict[str, dict[str, Any]] = {TOOL_NAME: load_request_schema(schema_dir)}
@@ -144,7 +148,7 @@ def build_server(
         for name, schema in schemas.items()
     ]
     handlers: dict[str, Callable[[dict[str, Any]], types.CallToolResult]] = {
-        TOOL_NAME: lambda args: _retrieve(backend, args)
+        TOOL_NAME: lambda args: _retrieve(backend, args, default_scope)
     }
     if write is not None:
         handlers[PROPOSE_TOOL] = lambda args: _propose(write, args)
@@ -178,7 +182,15 @@ def build_server(
     )
 
 
-def _retrieve(backend: RetrievalBackend, args: dict[str, Any]) -> types.CallToolResult:
+def _retrieve(
+    backend: RetrievalBackend,
+    args: dict[str, Any],
+    default_scope: Sequence[str] | None = None,
+) -> types.CallToolResult:
+    if default_scope and "scope" not in args:
+        # The contract's own default is ["global"]; the server operator can
+        # widen it so project knowledge is found without every caller asking.
+        args = {**args, "scope": list(default_scope)}
     try:
         result = backend.retrieve(args)
     except ValueError as exc:

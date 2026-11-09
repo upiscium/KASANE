@@ -42,6 +42,7 @@ def generate_level1_report(
     for item in golden["queries"]:
         request = copy.deepcopy(item["request"])
         request["mode"] = "auto"
+        request.setdefault("min_trust", "T3")  # canonical-only reference run
         result = service.retrieve(request)
         refs = [entry["uri"] for entry in result.artifact.get("knowledge_refs", [])]
         expected = [str(ref) for ref in item.get("expected_relevant_refs", [])]

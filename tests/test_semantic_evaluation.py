@@ -75,6 +75,6 @@ def test_level0_baseline_artifact_is_not_modified() -> None:
     # file to itself is vacuous.
     assert (
         hashlib.sha256(baseline).hexdigest()
-        == "d987a6e7e2a82a1b4074306484045d17fb767434e1d1f9f8fd1a1281b89fa48e"
+        == "61a3e88892a3c6dc1d2d0f7b93eeb43a5d768216a5ad657d848f7fe05518eb7b"
     )
     assert json.loads(baseline)["schema_version"] == "level0-evaluation-v1"

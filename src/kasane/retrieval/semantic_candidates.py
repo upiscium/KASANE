@@ -13,7 +13,7 @@ from datetime import UTC, datetime
 
 from kasane.vault.models import KnowledgeRecord
 
-from .eligibility import RetrievalEligibility
+from .eligibility import CANONICAL_TIER, RetrievalEligibility, TierResolver
 from .embeddings import (
     SEMANTIC_DOCUMENT_REPRESENTATION_VERSION,
     EmbeddingProviderIdentity,
@@ -78,9 +78,16 @@ class SemanticCandidateService:
         query: str,
         scope: Sequence[str],
         now: datetime | None = None,
+        *,
+        min_trust: int = CANONICAL_TIER,
+        tier_of: TierResolver | None = None,
     ) -> SemanticCandidateResult:
         source = list(records)
-        eligible, _ = self._eligibility.filter(source, scope, now or utc_now())
+        # Only records eligible for *this* request reach the semantic index;
+        # ineligible ones would otherwise occupy candidate slots (#41).
+        eligible, _ = self._eligibility.filter(
+            source, scope, now or utc_now(), min_trust, tier_of
+        )
         bounded = sorted(eligible, key=lambda record: record.knowledge_ref)
         truncated = max(0, len(bounded) - MAX_SEMANTIC_RECORDS)
         bounded = bounded[:MAX_SEMANTIC_RECORDS]

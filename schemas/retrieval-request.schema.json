@@ -51,6 +51,11 @@
         "id": {"type": "string", "minLength": 1, "maxLength": 256}
       }
     },
+    "min_trust": {
+      "description": "Lowest trust tier to include (see docs/trust.md): T0 candidate, T1 verified, T2 verified and approval-eligible, T3 canonical. Deprecated and archived knowledge is never returned.",
+      "enum": ["T0", "T1", "T2", "T3"],
+      "default": "T1"
+    },
     "budget": {
       "type": "object",
       "additionalProperties": false,

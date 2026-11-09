@@ -1,18 +1,21 @@
 """Deterministic eligibility policy for retrieval candidates.
 
-This module deliberately only answers whether a canonical record may enter a
+This module deliberately only answers whether a live record may enter a
 retrieval candidate set.  Applicability and counterconditions are reserved for
 an evaluator, so any non-empty value remains ineligible here.
 """
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Literal
 
 from kasane.vault.models import KnowledgeRecord, KnowledgeStatus
+
+TierResolver = Callable[[KnowledgeRecord], int]
+CANONICAL_TIER = 3
 
 Freshness = Literal["fresh", "stale", "malformed"]
 ExclusionReason = Literal[
@@ -57,6 +60,8 @@ class RetrievalEligibility:
         record: KnowledgeRecord,
         scope: Sequence[str],
         now: datetime,
+        min_trust: int = CANONICAL_TIER,
+        tier_of: TierResolver | None = None,
     ) -> EligibilityResult:
         """Return the policy outcome without mutating the record or request."""
 
@@ -66,7 +71,7 @@ class RetrievalEligibility:
         specificity = scope_specificity(record.knowledge_ref, scope)
         if specificity < 0:
             return EligibilityResult(False, specificity, "fresh", "scope")
-        if record.status is not KnowledgeStatus.CANONICAL:
+        if not _meets_trust(record, min_trust, tier_of):
             return EligibilityResult(False, specificity, "fresh", "lifecycle")
         freshness = record_freshness(record.stale_after, now)
         if freshness != "fresh":
@@ -83,11 +88,13 @@ class RetrievalEligibility:
         records: list[KnowledgeRecord],
         scope: Sequence[str],
         now: datetime,
+        min_trust: int = CANONICAL_TIER,
+        tier_of: TierResolver | None = None,
     ) -> tuple[list[KnowledgeRecord], EligibilityCounts]:
         eligible: list[KnowledgeRecord] = []
         excluded = {reason: 0 for reason in _EXCLUSION_REASONS}
         for record in records:
-            result = self.evaluate(record, scope, now)
+            result = self.evaluate(record, scope, now, min_trust, tier_of)
             if result.eligible:
                 eligible.append(record)
             else:
@@ -101,6 +108,33 @@ class RetrievalEligibility:
             excluded["stale"] + excluded["malformed_freshness"],
             excluded["malformed_freshness"],
         )
+
+
+_STATUS_FLOOR = {
+    KnowledgeStatus.CANDIDATE: 0,
+    KnowledgeStatus.VERIFIED: 1,
+    KnowledgeStatus.CANONICAL: 3,
+}
+
+
+def status_tier(record: KnowledgeRecord) -> int | None:
+    """Tier implied by status alone; verified may still be T2 (needs events)."""
+
+    return _STATUS_FLOOR.get(record.status)
+
+
+def _meets_trust(
+    record: KnowledgeRecord, min_trust: int, tier_of: TierResolver | None
+) -> bool:
+    floor = status_tier(record)
+    if floor is None:  # deprecated, archived, superseded: never served
+        return False
+    if floor >= min_trust:
+        return True
+    if record.status is KnowledgeStatus.VERIFIED and min_trust == 2:
+        # Only T2 needs the event log; resolve lazily and fail closed.
+        return tier_of is not None and tier_of(record) >= 2
+    return False
 
 
 def scope_specificity(knowledge_ref: str, selectors: Sequence[str]) -> int:

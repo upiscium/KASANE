@@ -29,6 +29,8 @@ class RetrievalRequest:
     budget: RetrievalBudget
     tokenizer_id: str | None
     task: RetrievalTask | None
+    # Lowest trust tier to return: 0 candidate .. 3 canonical (see #40/#41).
+    min_trust: int = 1
 
 
 @dataclass(frozen=True)
@@ -78,3 +80,4 @@ class RankedKnowledge:
     exact_tag: bool
     exact_topic: bool
     scope_specificity: int
+    trust_rank: int = 0

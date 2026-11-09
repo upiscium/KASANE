@@ -8,6 +8,8 @@ from typing import Any
 
 from .models import RetrievalBudget, RetrievalRequest, RetrievalTask
 
+TRUST_TIERS = {"T0": 0, "T1": 1, "T2": 2, "T3": 3}
+
 _SCOPE_PATTERN = re.compile(
     r"^(global(?:/[A-Za-z0-9][A-Za-z0-9._-]{0,127})*|"
     r"(?:project|research|private)/[A-Za-z0-9][A-Za-z0-9._-]{0,127}"
@@ -21,7 +23,16 @@ def parse_retrieval_request(value: Mapping[str, Any]) -> RetrievalRequest:
     _require_keys(value, {"schema_version", "query", "mode", "budget"})
     _reject_extra(
         value,
-        {"schema_version", "query", "task", "scope", "mode", "tokenizer", "budget"},
+        {
+            "schema_version",
+            "query",
+            "task",
+            "scope",
+            "mode",
+            "tokenizer",
+            "budget",
+            "min_trust",
+        },
     )
     if value["schema_version"] != "0.1":
         raise ValueError("schema_version must be '0.1'")
@@ -67,6 +78,9 @@ def parse_retrieval_request(value: Mapping[str, Any]) -> RetrievalRequest:
         tokenizer_id = _bounded_string(tokenizer["id"], "tokenizer.id", 1, 256)
 
     task = _parse_task(value["task"]) if "task" in value else None
+    min_trust = value.get("min_trust", "T1")
+    if not isinstance(min_trust, str) or min_trust not in TRUST_TIERS:
+        raise ValueError("min_trust must be one of T0, T1, T2, T3")
     return RetrievalRequest(
         query=query,
         scope=tuple(scope),
@@ -74,6 +88,7 @@ def parse_retrieval_request(value: Mapping[str, Any]) -> RetrievalRequest:
         budget=budget,
         tokenizer_id=tokenizer_id,
         task=task,
+        min_trust=TRUST_TIERS[min_trust],
     )
 
 

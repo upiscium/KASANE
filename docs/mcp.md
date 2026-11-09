@@ -17,8 +17,16 @@ exact wire artifact, returned both as structured content and as JSON text.
 | Budget cannot hold any capsule | true | Retrieval error v0.1 |
 | Malformed request | true | Plain text (v0.1 defines no wire error for this) |
 
-Only `canonical` knowledge is retrievable. Retrieval never writes canonical
-Vault state; it only maintains the disposable derived lexical index.
+Every returned knowledge ref carries a trust tier (T0 candidate … T3 canonical);
+requests choose the floor with `min_trust` (default `T1`). Deprecated and
+archived knowledge is never returned. Retrieval never writes canonical Vault
+state; it only maintains the disposable derived lexical index.
+
+The contract's default `scope` is `["global"]`, so project knowledge is invisible
+unless a request names it. `serve --default-scope global --default-scope
+project/kasane` (or `KASANE_DEFAULT_SCOPES=global,project/kasane`) sets the scope
+used when a request omits it; an explicit request scope always wins. Invalid
+values fail at startup.
 
 ## Writing knowledge (`--allow-write`)
 
@@ -61,9 +69,11 @@ a scoped writer never sees or is blocked by knowledge outside its scopes.
 Omitting it allows writes to every namespace, including `private/*`.
 
 **Before enabling writes in real use:** there is no emergency stop until
-`kasane-admin freeze`/`quarantine` lands, and `kasane_retrieve` still serves only
-canonical knowledge, so agents cannot yet discover candidates except through
-the `similar` list returned by `kasane_propose` (trust-labeled retrieval: #41).
+`kasane-admin freeze`/`quarantine` lands.
+
+**Discovery:** verified knowledge (T1/T2) is returned by default, so agents can
+report outcomes on it. Candidates (T0) appear only with `min_trust: "T0"`; their
+main route to corroboration is the near-duplicate refusal of `kasane_propose`.
 
 ## Running
 

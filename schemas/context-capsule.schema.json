@@ -117,11 +117,24 @@
     "knowledge_ref": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "uri"],
+      "required": ["id", "uri", "trust"],
       "properties": {
         "id": {"$ref": "#/$defs/id"},
         "uri": {"$ref": "#/$defs/knowledge_uri"},
-        "revision": {"type": "string", "minLength": 1, "maxLength": 256}
+        "revision": {"type": "string", "minLength": 1, "maxLength": 256},
+        "trust": {
+          "description": "Compact trust label. T0 candidate, T1 verified, T2 verified and approval-eligible, T3 canonical (docs/trust.md).",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["tier"],
+          "properties": {
+            "tier": {"enum": ["T0", "T1", "T2", "T3"]},
+            "revalidation": {
+              "const": true,
+              "description": "Present only for canonical knowledge that has a reported failure and is served pending revalidation."
+            }
+          }
+        }
       }
     },
     "evidence_item": {

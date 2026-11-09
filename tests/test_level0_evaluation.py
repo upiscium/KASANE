@@ -65,22 +65,20 @@ def test_report_generation_is_deterministic_and_matches_snapshot(
     baseline = load(BASELINE)
     assert first == second
 
-    # The snapshot is the historical Issue #6 artifact.  A refactor may
-    # legitimately change implementation provenance without changing any
-    # evaluation behavior or report content.
-    current = dict(first)
-    current.pop("implementation_sha256")
-    expected = dict(baseline)
-    expected.pop("implementation_sha256")
-    assert current == expected
+    # The snapshot pins behavior *and* implementation provenance (#37): any
+    # change to the hashed retrieval files must refresh baseline.json in the
+    # same change, so the hash can never silently drift again.
+    assert first == baseline, (
+        "Level 0 baseline is stale: regenerate evaluation/level0/baseline.json "
+        "(python -m kasane.evaluation.level0 --output ...) and review the diff"
+    )
     assert "latency" not in json.dumps(first).casefold()
     assert "elapsed" not in json.dumps(first).casefold()
 
     output = tmp_path / "report.json"
     write_report(first, output)
     written = load(output)
-    written.pop("implementation_sha256")
-    assert written == expected
+    assert written == baseline
 
 
 def test_level0_baseline_file_bytes_are_stable_during_evaluation(
