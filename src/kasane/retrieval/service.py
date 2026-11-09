@@ -11,7 +11,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from kasane.vault.models import KnowledgeRecord
+from kasane.trust.policy import TrustPolicyConfig
+from kasane.trust.policy import evaluate as evaluate_trust
+from kasane.vault.models import KnowledgeRecord, KnowledgeStatus
 from kasane.vault.repository import VaultRepository
 
 from .budget import BudgetAccountant, ExactTokenCounter
@@ -20,6 +22,7 @@ from .eligibility import (
     has_unevaluated_conditions,
     record_freshness,
     scope_specificity,
+    status_tier,
 )
 from .index import DerivedLexicalIndex, normalized_terms
 from .models import (
@@ -49,7 +52,11 @@ def utc_now() -> datetime:
 
 
 class Level0RetrievalService:
-    """Canonical-only deterministic retrieval with a disposable lexical index."""
+    """Deterministic, trust-labeled retrieval with a disposable lexical index.
+
+    Each request selects a minimum trust tier (default T1); every returned
+    knowledge ref carries its trust label (#41).
+    """
 
     def __init__(
         self,
@@ -59,6 +66,7 @@ class Level0RetrievalService:
         clock: Clock = utc_now,
         token_counters: Mapping[str, ExactTokenCounter] | None = None,
         monotonic: Monotonic = time.perf_counter,
+        trust_policy: TrustPolicyConfig | None = None,
     ) -> None:
         canonical_path = repository.database_path
         derived_path = Path(
@@ -72,6 +80,7 @@ class Level0RetrievalService:
         self._eligibility = RetrievalEligibility()
         self._token_counters = dict(token_counters or {})
         self._monotonic = monotonic
+        self._trust_policy = trust_policy
 
     def rebuild_index(self) -> str:
         """Explicitly rebuild disposable lexical state from canonical records."""
@@ -118,11 +127,40 @@ class Level0RetrievalService:
             started=started,
         )
 
+    def trust_label(self, record: KnowledgeRecord) -> dict[str, Any]:
+        """Trust label for a live record, derived from the event log (#40)."""
+
+        assessment = evaluate_trust(
+            record.status,
+            record.verification_outcome,
+            self.repository.list_events(record.knowledge_ref),
+            self._trust_policy,
+        )
+        tier = assessment.tier
+        if tier is None:  # pragma: no cover - retired records are never eligible
+            raise ValueError(f"{record.knowledge_ref} has no trust tier")
+        # Compact on purpose: labels are paid for in every capsule's budget.
+        label: dict[str, Any] = {"tier": f"T{int(tier)}"}
+        if assessment.revalidation_requested:
+            label["revalidation"] = True
+        return label
+
+    def _tier(self, record: KnowledgeRecord) -> int:
+        if record.status is not KnowledgeStatus.VERIFIED:
+            return status_tier(record) or 0
+        tier = evaluate_trust(
+            record.status,
+            record.verification_outcome,
+            self.repository.list_events(record.knowledge_ref),
+            self._trust_policy,
+        ).tier
+        return int(tier) if tier is not None else 0
+
     def _eligible_records(
         self, records: list[KnowledgeRecord], request: RetrievalRequest
     ) -> tuple[list[KnowledgeRecord], tuple[int, int, int, int, int, int]]:
         eligible, counts = self._eligibility.filter(
-            records, request.scope, self._clock()
+            records, request.scope, self._clock(), request.min_trust, self._tier
         )
         return eligible, (
             counts.candidate_count,
@@ -164,6 +202,7 @@ class Level0RetrievalService:
                     scope_specificity=self._scope_specificity(
                         record.knowledge_ref, request.scope
                     ),
+                    trust_rank=status_tier(record) or 0,
                 )
             )
         return sorted(
@@ -173,6 +212,7 @@ class Level0RetrievalService:
                 -item.exact_tag,
                 -item.exact_topic,
                 item.lexical_score,
+                -item.trust_rank,  # tie-breaker only: relevance comes first
                 -item.scope_specificity,
                 item.knowledge_ref,
             ),
@@ -196,7 +236,7 @@ class Level0RetrievalService:
         if not ranked:
             payload = self._failed_payload(
                 request,
-                question="no eligible canonical Level 0 evidence matched the request",
+                question="no eligible Level 0 evidence matched the request",
                 terminal_reason="insufficient_evidence",
                 level=level,
                 path=path,
@@ -212,7 +252,7 @@ class Level0RetrievalService:
             payload = self._failed_payload(
                 request,
                 question=(
-                    "matching canonical evidence could not be included because "
+                    "matching evidence could not be included because "
                     "max_evidence_items is zero"
                 ),
                 terminal_reason="budget_limited",
@@ -270,11 +310,13 @@ class Level0RetrievalService:
         for position, record in enumerate(records, start=1):
             knowledge_id = f"knowledge-{position}"
             evidence_id = f"evidence-{position}"
+            label = self.trust_label(record)
             knowledge_refs.append(
                 {
                     "id": knowledge_id,
                     "uri": record.knowledge_ref,
                     "revision": str(record.revision),
+                    "trust": label,
                 }
             )
             evidence.append(
@@ -285,7 +327,7 @@ class Level0RetrievalService:
                     "provenance": self._provenance(record),
                 }
             )
-            context_parts.append(f"{record.title} [{knowledge_id}]")
+            context_parts.append(f"{record.title} [{knowledge_id}, {label['tier']}]")
 
         unresolved: list[dict[str, Any]] = []
         if degraded:
@@ -301,7 +343,7 @@ class Level0RetrievalService:
         return {
             "schema_version": "0.1",
             "status": "degraded" if degraded else "complete",
-            "context": "Relevant canonical knowledge: " + "; ".join(context_parts),
+            "context": "Relevant knowledge: " + "; ".join(context_parts),
             "critical_facts": [],
             "constraints": [],
             "pitfalls": [],
@@ -563,7 +605,12 @@ class Level1RetrievalService:
                 if hit.knowledge_ref in {r.knowledge_ref for r in eligible}
             ][:MAX_RERANK_CANDIDATES]
             semantic_result = self.semantic_service.generate(
-                records, request.query, request.scope, self.level0._clock()
+                records,
+                request.query,
+                request.scope,
+                self.level0._clock(),
+                min_trust=request.min_trust,
+                tier_of=self.level0._tier,
             )
             eligible_refs = {r.knowledge_ref for r in eligible}
             semantic_candidates = self._validated_semantic_candidates(

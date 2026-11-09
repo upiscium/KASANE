@@ -143,7 +143,7 @@ class CountingSemantic:
         self.calls = 0
         self.candidates = tuple(candidates)
 
-    def generate(self, records, query, scope, now):
+    def generate(self, records, query, scope, now, **trust):
         self.calls += 1
         return SimpleNamespace(
             candidates=self.candidates,
@@ -594,7 +594,7 @@ def test_hostile_scale_semantic_output_is_rejected_before_iteration(
     output = HostileScaleOutput([candidate] * 1_000_000)
 
     class HostileSemantic:
-        def generate(self, records, query, scope, now):
+        def generate(self, records, query, scope, now, **trust):
             return SimpleNamespace(
                 candidates=output,
                 synchronization=SimpleNamespace(
@@ -667,7 +667,7 @@ def test_index_failure_is_classified_separately(repository, tmp_path) -> None:
     )
 
     class BrokenIndex:
-        def generate(self, *args):
+        def generate(self, *args, **kwargs):
             raise sqlite3.DatabaseError("broken derived index")
 
     result = _service(
@@ -681,7 +681,7 @@ def test_internal_failure_is_not_labeled_as_provider_failure(
     repository, tmp_path
 ) -> None:
     class BrokenInternal:
-        def generate(self, *args):
+        def generate(self, *args, **kwargs):
             raise KeyError("unexpected internal state")
 
     result = _service(

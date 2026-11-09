@@ -25,6 +25,9 @@ from kasane.vault.repository import VaultRepository
 JsonObject = dict[str, Any]
 TOP_K = 3
 TEST_TOKENIZER_ID = "test:unicode-codepoint-v1"
+# The Level 0 reference evaluation measures canonical-only retrieval (#41):
+# trust-labeled tiers are opt-in per request and covered by unit tests.
+CANONICAL_ONLY = "T3"
 
 
 def load_json_object(path: str | Path) -> JsonObject:
@@ -204,6 +207,7 @@ def _evaluate_query(
     tokenizer_id: str,
 ) -> JsonObject:
     request_value = copy.deepcopy(_object(query["request"], "query.request"))
+    request_value.setdefault("min_trust", CANONICAL_ONLY)
     request_value["budget"] = copy.deepcopy(profile)
     request_value["tokenizer"] = {"id": tokenizer_id}
     parsed = parse_retrieval_request(request_value)
@@ -414,6 +418,7 @@ def _validate_corpus(
     for name, profile in profiles.items():
         value = _object(profile, f"profiles.{name}")
         request = copy.deepcopy(_object(queries[0]["request"], "query.request"))
+        request.setdefault("min_trust", CANONICAL_ONLY)
         request["budget"] = copy.deepcopy(value)
         request["tokenizer"] = {"id": TEST_TOKENIZER_ID}
         parse_retrieval_request(request)

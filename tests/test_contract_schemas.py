@@ -124,7 +124,7 @@ def retrieval_request() -> dict[str, Any]:
         },
         "scope": ["global", "project/villager-agent"],
         "mode": "auto",
-        "budget": {"max_tokens": 800, "max_bytes": 3200, "max_evidence_items": 5},
+        "budget": {"max_tokens": 1000, "max_bytes": 3200, "max_evidence_items": 5},
     }
 
 
@@ -151,6 +151,7 @@ def capsule() -> dict[str, Any]:
                 "id": "knowledge-1",
                 "uri": "vault://global/execution-integrity/effect-time-authority",
                 "revision": "v1",
+                "trust": {"tier": "T3"},
             }
         ],
         "evidence": [
@@ -171,7 +172,7 @@ def capsule() -> dict[str, Any]:
             "terminal_reason": "sufficient",
         },
         "budget": {
-            "requested_tokens": 800,
+            "requested_tokens": 1000,
             "requested_bytes": 3200,
             "method": "utf8_bytes",
             "guarantee": "hard_bytes",

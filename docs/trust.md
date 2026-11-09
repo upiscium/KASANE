@@ -35,6 +35,13 @@ Thresholds live in `TrustPolicyConfig` and are not part of the wire contract.
 - The policy (`kasane.trust.policy.evaluate`) is a pure function of status and
   events. It never sets `canonical`.
 
+## Retrieval
+
+`kasane_retrieve` returns knowledge at or above the request's `min_trust`
+(default `T1`), each ref labeled with its tier. Trust only breaks ties in
+ranking. Candidates (T0) are opt-in per request so unverified text does not
+enter other agents' context by default (#41).
+
 ## Contracts
 
 - `schemas/knowledge-proposal.schema.json` — what an agent submits. `knowledge_type`

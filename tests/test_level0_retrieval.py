@@ -11,6 +11,7 @@ import pytest
 from jsonschema import Draft202012Validator
 
 from kasane import (
+    EventType,
     KnowledgeDraft,
     KnowledgeRecord,
     KnowledgeStatus,
@@ -235,9 +236,9 @@ def test_exact_tag_query_and_body_lexical_query(
     assert selected_uris(body_result.capsule) == [body.knowledge_ref]
 
 
-def test_default_trust_eligibility_is_canonical_only(
-    repository: VaultRepository, service: Level0RetrievalService
-) -> None:
+def _trust_fixture(
+    repository: VaultRepository,
+) -> dict[KnowledgeStatus, KnowledgeRecord]:
     statuses = [
         KnowledgeStatus.CANDIDATE,
         KnowledgeStatus.VERIFIED,
@@ -245,7 +246,7 @@ def test_default_trust_eligibility_is_canonical_only(
         KnowledgeStatus.DEPRECATED,
         KnowledgeStatus.ARCHIVED,
     ]
-    records = {
+    return {
         status: store(
             repository,
             draft(
@@ -258,13 +259,123 @@ def test_default_trust_eligibility_is_canonical_only(
         for status in statuses
     }
 
+
+def test_default_trust_floor_is_t1_with_labels(
+    repository: VaultRepository, service: Level0RetrievalService
+) -> None:
+    records = _trust_fixture(repository)
+
     result = service.retrieve(request("eligibility marker"))
 
     assert result.capsule is not None
+    # Equal relevance: trust breaks the tie, canonical first.
     assert selected_uris(result.capsule) == [
-        records[KnowledgeStatus.CANONICAL].knowledge_ref
+        records[KnowledgeStatus.CANONICAL].knowledge_ref,
+        records[KnowledgeStatus.VERIFIED].knowledge_ref,
     ]
-    assert result.diagnostics.excluded_lifecycle_count == 4
+    labels = [item["trust"] for item in result.capsule["knowledge_refs"]]
+    assert labels == [{"tier": "T3"}, {"tier": "T1"}]
+    assert "[knowledge-2, T1]" in result.capsule["context"]
+    assert result.diagnostics.excluded_lifecycle_count == 3
+
+
+@pytest.mark.parametrize(
+    ("min_trust", "expected"),
+    [
+        ("T3", [KnowledgeStatus.CANONICAL]),
+        ("T2", [KnowledgeStatus.CANONICAL]),
+        (
+            "T0",
+            [
+                KnowledgeStatus.CANONICAL,
+                KnowledgeStatus.VERIFIED,
+                KnowledgeStatus.CANDIDATE,
+            ],
+        ),
+    ],
+)
+def test_min_trust_selects_tiers_and_never_retired(
+    repository: VaultRepository,
+    service: Level0RetrievalService,
+    min_trust: str,
+    expected: list[KnowledgeStatus],
+) -> None:
+    records = _trust_fixture(repository)
+
+    result = service.retrieve({**request("eligibility marker"), "min_trust": min_trust})
+
+    assert result.capsule is not None
+    assert selected_uris(result.capsule) == [
+        records[status].knowledge_ref for status in expected
+    ]
+
+
+def test_t2_requires_independent_successes(
+    repository: VaultRepository, service: Level0RetrievalService
+) -> None:
+    from kasane.trust import AgentContext, TrustService
+
+    trust = TrustService(repository)
+    ref = "vault://global/trust/earned"
+    trust.propose(
+        {
+            "schema_version": "0.1",
+            "knowledge_ref": ref,
+            "knowledge_type": "procedure",
+            "title": "Earned trust",
+            "body": "tiered eligibility marker for approval",
+            "sources": [{"source_type": "other", "handle": "test"}],
+        },
+        AgentContext("author", "s0", "m1"),
+    )
+    signal = {"schema_version": "0.1", "knowledge_ref": ref}
+    trust.signal(
+        {**signal, "kind": "verification", "verification": "passed", "note": "ok"},
+        AgentContext("verifier", "s1", "m1"),
+    )
+    t2_request = {**request("tiered eligibility marker"), "min_trust": "T2"}
+    assert (
+        selected_uris(service.retrieve(t2_request).capsule or {"knowledge_refs": []})
+        == []
+    )
+
+    for session in ("u1", "u2"):
+        trust.signal(
+            {**signal, "kind": "outcome", "outcome": "success", "note": "worked"},
+            AgentContext("user", session, "m1"),
+        )
+    result = service.retrieve(t2_request)
+    assert result.capsule is not None
+    assert selected_uris(result.capsule) == [ref]
+    assert result.capsule["knowledge_refs"][0]["trust"]["tier"] == "T2"
+
+
+def test_canonical_pending_revalidation_is_served_and_labeled(
+    repository: VaultRepository, service: Level0RetrievalService
+) -> None:
+    record = store(
+        repository,
+        draft(
+            "vault://global/trust/wobbly", title="Wobbly", body="revalidation marker"
+        ),
+    )
+    repository.record_signal_event(
+        record.knowledge_ref,
+        EventType.REVALIDATION_REQUESTED,
+        expected_revision=record.revision,
+        actor="policy",
+    )
+    result = service.retrieve(request("revalidation marker"))
+    assert result.capsule is not None
+    assert result.capsule["knowledge_refs"][0]["trust"] == {
+        "tier": "T3",
+        "revalidation": True,
+    }
+
+
+def test_invalid_min_trust_is_rejected(service: Level0RetrievalService) -> None:
+    with pytest.raises(ValueError, match="min_trust"):
+        service.retrieve({**request("anything"), "min_trust": "T9"})
 
 
 def test_extracted_eligibility_policy_matches_level0_filter(

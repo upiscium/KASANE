@@ -48,6 +48,7 @@ def _request(query_id: str = "q01-exact-title") -> dict[str, Any]:
     request: dict[str, Any] = dict(query["request"])
     request["budget"] = dict(PROFILES["profiles"]["normal"])
     request["tokenizer"] = {"id": TEST_TOKENIZER_ID}
+    request.setdefault("min_trust", "T3")  # compare with the canonical baseline
     return request
 
 
@@ -129,4 +130,55 @@ def test_seed_refuses_existing_vault(tmp_path: Path) -> None:
     assert cli_main(["seed-fixture", "--vault", str(vault)]) == 0
     with pytest.raises(SystemExit) as raised:
         cli_main(["seed-fixture", "--vault", str(vault)])
+    assert raised.value.code == 2
+
+
+def test_server_default_scope_applies_only_when_request_omits_scope(
+    tmp_path: Path,
+) -> None:
+    from kasane.trust import AgentContext, TrustService
+
+    repository = VaultRepository(tmp_path / "vault.db")
+    service = Level0RetrievalService(
+        repository, tmp_path / "index.db", token_counters={TEST_TOKENIZER_ID: len}
+    )
+    TrustService(repository).propose(
+        {
+            "schema_version": "0.1",
+            "knowledge_ref": "vault://project/kasane/procedures/scoped",
+            "knowledge_type": "procedure",
+            "title": "Scoped project knowledge",
+            "body": "project scoped marker",
+            "sources": [{"source_type": "other", "handle": "t"}],
+        },
+        AgentContext("a", "s", "m"),
+    )
+    base = {
+        "schema_version": "0.1",
+        "query": "project scoped marker",
+        "mode": "fast",
+        "min_trust": "T0",
+        "budget": {"max_tokens": 5000, "max_bytes": 20000, "max_evidence_items": 3},
+    }
+
+    def refs(server: Any, request: dict[str, Any]) -> list[str]:
+        async def run() -> Any:
+            async with Client(server) as client:
+                return await client.call_tool(TOOL_NAME, request)
+
+        capsule = anyio.run(run).structured_content
+        return [item["uri"] for item in capsule.get("knowledge_refs", [])]
+
+    plain = build_server(service)
+    widened = build_server(service, default_scope=["global", "project/kasane"])
+    assert refs(plain, base) == []  # contract default is ["global"]
+    assert refs(widened, base) == ["vault://project/kasane/procedures/scoped"]
+    assert refs(widened, {**base, "scope": ["global"]}) == []  # explicit wins
+
+
+def test_invalid_default_scope_fails_at_startup(tmp_path: Path) -> None:
+    vault = tmp_path / "vault.db"
+    VaultRepository(vault)
+    with pytest.raises(SystemExit) as raised:
+        cli_main(["serve", "--vault", str(vault), "--default-scope", "bogus/../x"])
     assert raised.value.code == 2

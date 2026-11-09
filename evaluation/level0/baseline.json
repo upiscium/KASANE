@@ -36,7 +36,7 @@
   "dataset_version": "level0-golden-v1",
   "fixture_sha256": "e304a65ea316802d1e68f900f73efd2422cf30410e8feaf96030623cbcfe3f3c",
   "implementation": "Level0RetrievalService issue-6 baseline",
-  "implementation_sha256": "addc24c62aa71620b06fabd122c56c8091b9e6ff775dbb2853e4f09e61792cdc",
+  "implementation_sha256": "791d2003256d477b8924245f4fb9732b5aeb03b440df975c7e87b377fd4df632",
   "level": 0,
   "level1_recommendation": {
     "basis": "normal profile records 2 candidate-generation misses and 1 ranking miss; expansion and reranking address distinct failures",
@@ -57,9 +57,9 @@
         "ranking_outside_top3": 1
       },
       "metrics": {
-        "max_exact_token_count": 2664,
-        "mean_capsule_serialized_bytes": 839.625,
-        "mean_exact_token_count": 839.625,
+        "max_exact_token_count": 2810,
+        "mean_capsule_serialized_bytes": 867.0,
+        "mean_exact_token_count": 867.0,
         "mean_selected_count": 1.4375,
         "mrr": 0.788462,
         "no_match_accuracy": 0.875,
@@ -72,12 +72,12 @@
       },
       "per_query": [
         {
-          "capsule_serialized_bytes": 1000,
+          "capsule_serialized_bytes": 1042,
           "eligible_ranked_refs": [
             "vault://global/transactions/atomic-write",
             "vault://global/storage/database-write-lock"
           ],
-          "exact_token_count": 1000,
+          "exact_token_count": 1042,
           "expected_no_match": false,
           "expected_relevant_refs": [
             "vault://global/transactions/atomic-write"
@@ -117,11 +117,11 @@
           ]
         },
         {
-          "capsule_serialized_bytes": 644,
+          "capsule_serialized_bytes": 660,
           "eligible_ranked_refs": [
             "vault://global/storage/derived-lexical-index"
           ],
-          "exact_token_count": 644,
+          "exact_token_count": 660,
           "expected_no_match": false,
           "expected_relevant_refs": [
             "vault://global/storage/derived-lexical-index"
@@ -156,11 +156,11 @@
           "wrong_selected_refs": []
         },
         {
-          "capsule_serialized_bytes": 627,
+          "capsule_serialized_bytes": 643,
           "eligible_ranked_refs": [
             "vault://project/terreate/buffer-write-contract"
           ],
-          "exact_token_count": 627,
+          "exact_token_count": 643,
           "expected_no_match": false,
           "expected_relevant_refs": [
             "vault://project/terreate/buffer-write-contract"
@@ -196,11 +196,11 @@
           "wrong_selected_refs": []
         },
         {
-          "capsule_serialized_bytes": 647,
+          "capsule_serialized_bytes": 663,
           "eligible_ranked_refs": [
             "vault://global/execution/effect-time-validation"
           ],
-          "exact_token_count": 647,
+          "exact_token_count": 663,
           "expected_no_match": false,
           "expected_relevant_refs": [
             "vault://global/execution/effect-time-validation"
@@ -235,12 +235,12 @@
           "wrong_selected_refs": []
         },
         {
-          "capsule_serialized_bytes": 1023,
+          "capsule_serialized_bytes": 1065,
           "eligible_ranked_refs": [
             "vault://global/events/append-only-history",
             "vault://global/transactions/atomic-write"
           ],
-          "exact_token_count": 1023,
+          "exact_token_count": 1065,
           "expected_no_match": false,
           "expected_relevant_refs": [
             "vault://global/events/append-only-history"
@@ -280,11 +280,11 @@
           ]
         },
         {
-          "capsule_serialized_bytes": 603,
+          "capsule_serialized_bytes": 619,
           "eligible_ranked_refs": [
             "vault://project/terreate/scope-shared"
           ],
-          "exact_token_count": 603,
+          "exact_token_count": 619,
           "expected_no_match": false,
           "expected_relevant_refs": [
             "vault://project/terreate/scope-shared"
@@ -321,9 +321,9 @@
           "wrong_selected_refs": []
         },
         {
-          "capsule_serialized_bytes": 406,
+          "capsule_serialized_bytes": 396,
           "eligible_ranked_refs": [],
-          "exact_token_count": 406,
+          "exact_token_count": 396,
           "expected_no_match": true,
           "expected_relevant_refs": [],
           "failure_classification": {
@@ -354,9 +354,9 @@
           "wrong_selected_refs": []
         },
         {
-          "capsule_serialized_bytes": 406,
+          "capsule_serialized_bytes": 396,
           "eligible_ranked_refs": [],
-          "exact_token_count": 406,
+          "exact_token_count": 396,
           "expected_no_match": false,
           "expected_relevant_refs": [
             "vault://global/execution/effect-time-validation"
@@ -387,9 +387,9 @@
           "wrong_selected_refs": []
         },
         {
-          "capsule_serialized_bytes": 406,
+          "capsule_serialized_bytes": 396,
           "eligible_ranked_refs": [],
-          "exact_token_count": 406,
+          "exact_token_count": 396,
           "expected_no_match": false,
           "expected_relevant_refs": [
             "vault://global/network/transport-layer-security"
@@ -420,12 +420,12 @@
           "wrong_selected_refs": []
         },
         {
-          "capsule_serialized_bytes": 1000,
+          "capsule_serialized_bytes": 1042,
           "eligible_ranked_refs": [
             "vault://global/storage/database-write-lock",
             "vault://global/transactions/atomic-write"
           ],
-          "exact_token_count": 1000,
+          "exact_token_count": 1042,
           "expected_no_match": false,
           "expected_relevant_refs": [
             "vault://global/storage/database-write-lock"
@@ -465,12 +465,12 @@
           ]
         },
         {
-          "capsule_serialized_bytes": 940,
+          "capsule_serialized_bytes": 982,
           "eligible_ranked_refs": [
             "vault://global/cache/invalidation",
             "vault://project/terreate/cache-invalidation"
           ],
-          "exact_token_count": 940,
+          "exact_token_count": 982,
           "expected_no_match": false,
           "expected_relevant_refs": [
             "vault://global/cache/invalidation",
@@ -509,14 +509,14 @@
           "wrong_selected_refs": []
         },
         {
-          "capsule_serialized_bytes": 1603,
+          "capsule_serialized_bytes": 1697,
           "eligible_ranked_refs": [
             "vault://global/observability/request-correlation",
             "vault://global/http/request-validation",
             "vault://global/http/request-retry",
             "vault://global/http/request-routing"
           ],
-          "exact_token_count": 1603,
+          "exact_token_count": 1697,
           "expected_no_match": false,
           "expected_relevant_refs": [
             "vault://global/observability/request-correlation"
@@ -561,9 +561,9 @@
           ]
         },
         {
-          "capsule_serialized_bytes": 406,
+          "capsule_serialized_bytes": 396,
           "eligible_ranked_refs": [],
-          "exact_token_count": 406,
+          "exact_token_count": 396,
           "expected_no_match": true,
           "expected_relevant_refs": [],
           "failure_classification": {
@@ -590,9 +590,9 @@
           "wrong_selected_refs": []
         },
         {
-          "capsule_serialized_bytes": 406,
+          "capsule_serialized_bytes": 396,
           "eligible_ranked_refs": [],
-          "exact_token_count": 406,
+          "exact_token_count": 396,
           "expected_no_match": true,
           "expected_relevant_refs": [],
           "failure_classification": {
@@ -631,7 +631,7 @@
           "wrong_selected_refs": []
         },
         {
-          "capsule_serialized_bytes": 2664,
+          "capsule_serialized_bytes": 2810,
           "eligible_ranked_refs": [
             "vault://global/ranking/a-distractor",
             "vault://global/ranking/b-distractor",
@@ -641,7 +641,7 @@
             "vault://global/observability/request-correlation",
             "vault://global/retrieval/budget-accounting"
           ],
-          "exact_token_count": 2664,
+          "exact_token_count": 2810,
           "expected_no_match": false,
           "expected_relevant_refs": [
             "vault://global/ranking/z-authoritative"
@@ -695,11 +695,11 @@
           ]
         },
         {
-          "capsule_serialized_bytes": 653,
+          "capsule_serialized_bytes": 669,
           "eligible_ranked_refs": [
             "vault://global/network/transport-layer-security"
           ],
-          "exact_token_count": 653,
+          "exact_token_count": 669,
           "expected_no_match": false,
           "expected_relevant_refs": [
             "vault://global/network/transport-layer-security"
@@ -751,9 +751,9 @@
         "ranking_outside_top3": 1
       },
       "metrics": {
-        "max_exact_token_count": 1521,
-        "mean_capsule_serialized_bytes": 759.125,
-        "mean_exact_token_count": 759.125,
+        "max_exact_token_count": 1589,
+        "mean_capsule_serialized_bytes": 780.0,
+        "mean_exact_token_count": 780.0,
         "mean_selected_count": 1.1875,
         "mrr": 0.769231,
         "no_match_accuracy": 0.875,
@@ -766,12 +766,12 @@
       },
       "per_query": [
         {
-          "capsule_serialized_bytes": 1000,
+          "capsule_serialized_bytes": 1042,
           "eligible_ranked_refs": [
             "vault://global/transactions/atomic-write",
             "vault://global/storage/database-write-lock"
           ],
-          "exact_token_count": 1000,
+          "exact_token_count": 1042,
           "expected_no_match": false,
           "expected_relevant_refs": [
             "vault://global/transactions/atomic-write"
@@ -811,11 +811,11 @@
           ]
         },
         {
-          "capsule_serialized_bytes": 644,
+          "capsule_serialized_bytes": 660,
           "eligible_ranked_refs": [
             "vault://global/storage/derived-lexical-index"
           ],
-          "exact_token_count": 644,
+          "exact_token_count": 660,
           "expected_no_match": false,
           "expected_relevant_refs": [
             "vault://global/storage/derived-lexical-index"
@@ -850,11 +850,11 @@
           "wrong_selected_refs": []
         },
         {
-          "capsule_serialized_bytes": 627,
+          "capsule_serialized_bytes": 643,
           "eligible_ranked_refs": [
             "vault://project/terreate/buffer-write-contract"
           ],
-          "exact_token_count": 627,
+          "exact_token_count": 643,
           "expected_no_match": false,
           "expected_relevant_refs": [
             "vault://project/terreate/buffer-write-contract"
@@ -890,11 +890,11 @@
           "wrong_selected_refs": []
         },
         {
-          "capsule_serialized_bytes": 647,
+          "capsule_serialized_bytes": 663,
           "eligible_ranked_refs": [
             "vault://global/execution/effect-time-validation"
           ],
-          "exact_token_count": 647,
+          "exact_token_count": 663,
           "expected_no_match": false,
           "expected_relevant_refs": [
             "vault://global/execution/effect-time-validation"
@@ -929,12 +929,12 @@
           "wrong_selected_refs": []
         },
         {
-          "capsule_serialized_bytes": 1023,
+          "capsule_serialized_bytes": 1065,
           "eligible_ranked_refs": [
             "vault://global/events/append-only-history",
             "vault://global/transactions/atomic-write"
           ],
-          "exact_token_count": 1023,
+          "exact_token_count": 1065,
           "expected_no_match": false,
           "expected_relevant_refs": [
             "vault://global/events/append-only-history"
@@ -974,11 +974,11 @@
           ]
         },
         {
-          "capsule_serialized_bytes": 603,
+          "capsule_serialized_bytes": 619,
           "eligible_ranked_refs": [
             "vault://project/terreate/scope-shared"
           ],
-          "exact_token_count": 603,
+          "exact_token_count": 619,
           "expected_no_match": false,
           "expected_relevant_refs": [
             "vault://project/terreate/scope-shared"
@@ -1015,9 +1015,9 @@
           "wrong_selected_refs": []
         },
         {
-          "capsule_serialized_bytes": 406,
+          "capsule_serialized_bytes": 396,
           "eligible_ranked_refs": [],
-          "exact_token_count": 406,
+          "exact_token_count": 396,
           "expected_no_match": true,
           "expected_relevant_refs": [],
           "failure_classification": {
@@ -1048,9 +1048,9 @@
           "wrong_selected_refs": []
         },
         {
-          "capsule_serialized_bytes": 406,
+          "capsule_serialized_bytes": 396,
           "eligible_ranked_refs": [],
-          "exact_token_count": 406,
+          "exact_token_count": 396,
           "expected_no_match": false,
           "expected_relevant_refs": [
             "vault://global/execution/effect-time-validation"
@@ -1081,9 +1081,9 @@
           "wrong_selected_refs": []
         },
         {
-          "capsule_serialized_bytes": 406,
+          "capsule_serialized_bytes": 396,
           "eligible_ranked_refs": [],
-          "exact_token_count": 406,
+          "exact_token_count": 396,
           "expected_no_match": false,
           "expected_relevant_refs": [
             "vault://global/network/transport-layer-security"
@@ -1114,12 +1114,12 @@
           "wrong_selected_refs": []
         },
         {
-          "capsule_serialized_bytes": 1000,
+          "capsule_serialized_bytes": 1042,
           "eligible_ranked_refs": [
             "vault://global/storage/database-write-lock",
             "vault://global/transactions/atomic-write"
           ],
-          "exact_token_count": 1000,
+          "exact_token_count": 1042,
           "expected_no_match": false,
           "expected_relevant_refs": [
             "vault://global/storage/database-write-lock"
@@ -1159,12 +1159,12 @@
           ]
         },
         {
-          "capsule_serialized_bytes": 940,
+          "capsule_serialized_bytes": 982,
           "eligible_ranked_refs": [
             "vault://global/cache/invalidation",
             "vault://project/terreate/cache-invalidation"
           ],
-          "exact_token_count": 940,
+          "exact_token_count": 982,
           "expected_no_match": false,
           "expected_relevant_refs": [
             "vault://global/cache/invalidation",
@@ -1203,14 +1203,14 @@
           "wrong_selected_refs": []
         },
         {
-          "capsule_serialized_bytes": 1458,
+          "capsule_serialized_bytes": 1526,
           "eligible_ranked_refs": [
             "vault://global/observability/request-correlation",
             "vault://global/http/request-validation",
             "vault://global/http/request-retry",
             "vault://global/http/request-routing"
           ],
-          "exact_token_count": 1458,
+          "exact_token_count": 1526,
           "expected_no_match": false,
           "expected_relevant_refs": [
             "vault://global/observability/request-correlation"
@@ -1253,9 +1253,9 @@
           ]
         },
         {
-          "capsule_serialized_bytes": 406,
+          "capsule_serialized_bytes": 396,
           "eligible_ranked_refs": [],
-          "exact_token_count": 406,
+          "exact_token_count": 396,
           "expected_no_match": true,
           "expected_relevant_refs": [],
           "failure_classification": {
@@ -1282,9 +1282,9 @@
           "wrong_selected_refs": []
         },
         {
-          "capsule_serialized_bytes": 406,
+          "capsule_serialized_bytes": 396,
           "eligible_ranked_refs": [],
-          "exact_token_count": 406,
+          "exact_token_count": 396,
           "expected_no_match": true,
           "expected_relevant_refs": [],
           "failure_classification": {
@@ -1323,7 +1323,7 @@
           "wrong_selected_refs": []
         },
         {
-          "capsule_serialized_bytes": 1521,
+          "capsule_serialized_bytes": 1589,
           "eligible_ranked_refs": [
             "vault://global/ranking/a-distractor",
             "vault://global/ranking/b-distractor",
@@ -1333,7 +1333,7 @@
             "vault://global/observability/request-correlation",
             "vault://global/retrieval/budget-accounting"
           ],
-          "exact_token_count": 1521,
+          "exact_token_count": 1589,
           "expected_no_match": false,
           "expected_relevant_refs": [
             "vault://global/ranking/z-authoritative"
@@ -1380,11 +1380,11 @@
           ]
         },
         {
-          "capsule_serialized_bytes": 653,
+          "capsule_serialized_bytes": 669,
           "eligible_ranked_refs": [
             "vault://global/network/transport-layer-security"
           ],
-          "exact_token_count": 653,
+          "exact_token_count": 669,
           "expected_no_match": false,
           "expected_relevant_refs": [
             "vault://global/network/transport-layer-security"
@@ -1436,9 +1436,9 @@
         "ranking_outside_top3": 1
       },
       "metrics": {
-        "max_exact_token_count": 830,
-        "mean_capsule_serialized_bytes": 625.5,
-        "mean_exact_token_count": 625.5,
+        "max_exact_token_count": 846,
+        "mean_capsule_serialized_bytes": 633.375,
+        "mean_exact_token_count": 633.375,
         "mean_selected_count": 0.6875,
         "mrr": 0.769231,
         "no_match_accuracy": 0.875,
@@ -1451,12 +1451,12 @@
       },
       "per_query": [
         {
-          "capsule_serialized_bytes": 830,
+          "capsule_serialized_bytes": 846,
           "eligible_ranked_refs": [
             "vault://global/transactions/atomic-write",
             "vault://global/storage/database-write-lock"
           ],
-          "exact_token_count": 830,
+          "exact_token_count": 846,
           "expected_no_match": false,
           "expected_relevant_refs": [
             "vault://global/transactions/atomic-write"
@@ -1493,11 +1493,11 @@
           "wrong_selected_refs": []
         },
         {
-          "capsule_serialized_bytes": 644,
+          "capsule_serialized_bytes": 660,
           "eligible_ranked_refs": [
             "vault://global/storage/derived-lexical-index"
           ],
-          "exact_token_count": 644,
+          "exact_token_count": 660,
           "expected_no_match": false,
           "expected_relevant_refs": [
             "vault://global/storage/derived-lexical-index"
@@ -1532,11 +1532,11 @@
           "wrong_selected_refs": []
         },
         {
-          "capsule_serialized_bytes": 627,
+          "capsule_serialized_bytes": 643,
           "eligible_ranked_refs": [
             "vault://project/terreate/buffer-write-contract"
           ],
-          "exact_token_count": 627,
+          "exact_token_count": 643,
           "expected_no_match": false,
           "expected_relevant_refs": [
             "vault://project/terreate/buffer-write-contract"
@@ -1572,11 +1572,11 @@
           "wrong_selected_refs": []
         },
         {
-          "capsule_serialized_bytes": 647,
+          "capsule_serialized_bytes": 663,
           "eligible_ranked_refs": [
             "vault://global/execution/effect-time-validation"
           ],
-          "exact_token_count": 647,
+          "exact_token_count": 663,
           "expected_no_match": false,
           "expected_relevant_refs": [
             "vault://global/execution/effect-time-validation"
@@ -1611,12 +1611,12 @@
           "wrong_selected_refs": []
         },
         {
-          "capsule_serialized_bytes": 813,
+          "capsule_serialized_bytes": 829,
           "eligible_ranked_refs": [
             "vault://global/events/append-only-history",
             "vault://global/transactions/atomic-write"
           ],
-          "exact_token_count": 813,
+          "exact_token_count": 829,
           "expected_no_match": false,
           "expected_relevant_refs": [
             "vault://global/events/append-only-history"
@@ -1653,11 +1653,11 @@
           "wrong_selected_refs": []
         },
         {
-          "capsule_serialized_bytes": 603,
+          "capsule_serialized_bytes": 619,
           "eligible_ranked_refs": [
             "vault://project/terreate/scope-shared"
           ],
-          "exact_token_count": 603,
+          "exact_token_count": 619,
           "expected_no_match": false,
           "expected_relevant_refs": [
             "vault://project/terreate/scope-shared"
@@ -1694,9 +1694,9 @@
           "wrong_selected_refs": []
         },
         {
-          "capsule_serialized_bytes": 406,
+          "capsule_serialized_bytes": 396,
           "eligible_ranked_refs": [],
-          "exact_token_count": 406,
+          "exact_token_count": 396,
           "expected_no_match": true,
           "expected_relevant_refs": [],
           "failure_classification": {
@@ -1727,9 +1727,9 @@
           "wrong_selected_refs": []
         },
         {
-          "capsule_serialized_bytes": 406,
+          "capsule_serialized_bytes": 396,
           "eligible_ranked_refs": [],
-          "exact_token_count": 406,
+          "exact_token_count": 396,
           "expected_no_match": false,
           "expected_relevant_refs": [
             "vault://global/execution/effect-time-validation"
@@ -1760,9 +1760,9 @@
           "wrong_selected_refs": []
         },
         {
-          "capsule_serialized_bytes": 406,
+          "capsule_serialized_bytes": 396,
           "eligible_ranked_refs": [],
-          "exact_token_count": 406,
+          "exact_token_count": 396,
           "expected_no_match": false,
           "expected_relevant_refs": [
             "vault://global/network/transport-layer-security"
@@ -1793,12 +1793,12 @@
           "wrong_selected_refs": []
         },
         {
-          "capsule_serialized_bytes": 790,
+          "capsule_serialized_bytes": 806,
           "eligible_ranked_refs": [
             "vault://global/storage/database-write-lock",
             "vault://global/transactions/atomic-write"
           ],
-          "exact_token_count": 790,
+          "exact_token_count": 806,
           "expected_no_match": false,
           "expected_relevant_refs": [
             "vault://global/storage/database-write-lock"
@@ -1835,12 +1835,12 @@
           "wrong_selected_refs": []
         },
         {
-          "capsule_serialized_bytes": 762,
+          "capsule_serialized_bytes": 778,
           "eligible_ranked_refs": [
             "vault://global/cache/invalidation",
             "vault://project/terreate/cache-invalidation"
           ],
-          "exact_token_count": 762,
+          "exact_token_count": 778,
           "expected_no_match": false,
           "expected_relevant_refs": [
             "vault://global/cache/invalidation",
@@ -1879,14 +1879,14 @@
           "wrong_selected_refs": []
         },
         {
-          "capsule_serialized_bytes": 815,
+          "capsule_serialized_bytes": 831,
           "eligible_ranked_refs": [
             "vault://global/observability/request-correlation",
             "vault://global/http/request-validation",
             "vault://global/http/request-retry",
             "vault://global/http/request-routing"
           ],
-          "exact_token_count": 815,
+          "exact_token_count": 831,
           "expected_no_match": false,
           "expected_relevant_refs": [
             "vault://global/observability/request-correlation"
@@ -1924,9 +1924,9 @@
           "wrong_selected_refs": []
         },
         {
-          "capsule_serialized_bytes": 406,
+          "capsule_serialized_bytes": 396,
           "eligible_ranked_refs": [],
-          "exact_token_count": 406,
+          "exact_token_count": 396,
           "expected_no_match": true,
           "expected_relevant_refs": [],
           "failure_classification": {
@@ -1953,9 +1953,9 @@
           "wrong_selected_refs": []
         },
         {
-          "capsule_serialized_bytes": 406,
+          "capsule_serialized_bytes": 396,
           "eligible_ranked_refs": [],
-          "exact_token_count": 406,
+          "exact_token_count": 396,
           "expected_no_match": true,
           "expected_relevant_refs": [],
           "failure_classification": {
@@ -1994,7 +1994,7 @@
           "wrong_selected_refs": []
         },
         {
-          "capsule_serialized_bytes": 794,
+          "capsule_serialized_bytes": 810,
           "eligible_ranked_refs": [
             "vault://global/ranking/a-distractor",
             "vault://global/ranking/b-distractor",
@@ -2004,7 +2004,7 @@
             "vault://global/observability/request-correlation",
             "vault://global/retrieval/budget-accounting"
           ],
-          "exact_token_count": 794,
+          "exact_token_count": 810,
           "expected_no_match": false,
           "expected_relevant_refs": [
             "vault://global/ranking/z-authoritative"
@@ -2047,11 +2047,11 @@
           ]
         },
         {
-          "capsule_serialized_bytes": 653,
+          "capsule_serialized_bytes": 669,
           "eligible_ranked_refs": [
             "vault://global/network/transport-layer-security"
           ],
-          "exact_token_count": 653,
+          "exact_token_count": 669,
           "expected_no_match": false,
           "expected_relevant_refs": [
             "vault://global/network/transport-layer-security"

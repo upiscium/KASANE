@@ -5,7 +5,7 @@ Level 0 is the always-available retrieval path. It uses no LLM, embedding, vecto
 ```text
 Retrieval Request
   -> logical scope filter
-  -> canonical trust filter
+  -> trust-tier filter (min_trust)
   -> fail-closed freshness filter
   -> safe lexical search
   -> deterministic ranking
@@ -17,7 +17,11 @@ The existing schemas remain the wire-contract SSOT. Python dataclasses represent
 
 ## Eligibility
 
-Default Agent-facing retrieval admits only `canonical` records. Candidate, verified, deprecated, and archived records are excluded before ranking. A passed verification outcome is not sufficient because verification recording, verified lifecycle state, and canonical promotion are distinct decisions.
+Each request sets `min_trust` (default `T1`; see [`trust.md`](trust.md)). Records below it are excluded before ranking: `T3` admits only `canonical`; `T2` adds verified records that are approval-eligible (computed from the event log); `T1` adds all verified records; `T0` adds candidates. Deprecated and archived records are never returned at any tier. A passed verification outcome alone does not raise a candidate's tier; only its lifecycle status and recorded signals do.
+
+Every returned knowledge ref carries a compact `trust` label (`{"tier": "T1"}`, plus `"revalidation": true` for canonical knowledge served pending revalidation), and the capsule `context` names each item's tier. Trust breaks ties only: ranking keys are, in order, exact title, exact tag, exact topic, lexical score, **trust**, scope specificity, ref. A weakly matching canonical record never outranks a strongly matching verified one.
+
+The reference evaluation (`evaluation/level0`) runs canonical-only (`min_trust: "T3"`).
 
 Scope selectors match the `vault://` URI with the scheme removed. A selector matches either the complete logical path or a prefix ending at a `/` segment boundary. Omitted scope is `global`. Scope narrows retrieval and does not grant authorization.
 
