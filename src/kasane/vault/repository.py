@@ -335,16 +335,23 @@ class VaultRepository:
                 )
             event_type = self._transition_event(source, target)
             new_revision = expected_revision + 1
+            # A demoted record must earn a fresh verification to rise again.
+            reset_verification = event_type is EventType.DEMOTED
             cursor = connection.execute(
                 """
                 UPDATE knowledge_records
-                SET status = ?, updated_at = ?, revision = ?
+                SET status = ?, updated_at = ?, revision = ?,
+                    verification_json = CASE WHEN ? THEN '{}' ELSE verification_json END,
+                    verification_outcome = CASE WHEN ? THEN NULL
+                                                ELSE verification_outcome END
                 WHERE knowledge_ref = ? AND revision = ?
                 """,
                 (
                     target.value,
                     timestamp,
                     new_revision,
+                    reset_verification,
+                    reset_verification,
                     knowledge_ref,
                     expected_revision,
                 ),
@@ -505,6 +512,7 @@ class VaultRepository:
             (KnowledgeStatus.CANDIDATE, KnowledgeStatus.ARCHIVED): EventType.ARCHIVED,
             (KnowledgeStatus.CANDIDATE, KnowledgeStatus.VERIFIED): EventType.VERIFIED,
             (KnowledgeStatus.VERIFIED, KnowledgeStatus.CANONICAL): EventType.PROMOTED,
+            (KnowledgeStatus.VERIFIED, KnowledgeStatus.CANDIDATE): EventType.DEMOTED,
             (KnowledgeStatus.VERIFIED, KnowledgeStatus.ARCHIVED): EventType.ARCHIVED,
             (
                 KnowledgeStatus.CANONICAL,

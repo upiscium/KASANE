@@ -283,6 +283,14 @@ class TrustService:
                 actor=POLICY_ACTOR,
                 metadata=evidence,
             )
+        elif action is PolicyAction.DEMOTE:
+            self.repository.transition_lifecycle(
+                ref,
+                KnowledgeStatus.CANDIDATE,
+                expected_revision=revision,
+                actor=POLICY_ACTOR,
+                event_metadata=evidence,
+            )
         elif action is PolicyAction.DEPRECATE:
             self.repository.transition_lifecycle(
                 ref,

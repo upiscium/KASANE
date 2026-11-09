@@ -144,3 +144,35 @@ def test_terminal_states_have_no_tier() -> None:
 def test_config_rejects_non_positive_thresholds() -> None:
     with pytest.raises(ValueError):
         TrustPolicyConfig(successes_for_approval=0)
+
+
+def test_verified_failures_demote_once_then_archive() -> None:
+    failures = [
+        ev(EventType.OUTCOME_REPORTED, session="f1", outcome="failure"),
+        ev(EventType.OUTCOME_REPORTED, session="f2", outcome="failure"),
+    ]
+    events = [created(), *failures]
+    assert evaluate(V, None, events).action is PolicyAction.DEMOTE
+
+    events.append(ev(EventType.DEMOTED, actor="policy"))
+    fresh = evaluate(C, None, events)
+    assert (fresh.failures, fresh.action) == (0, PolicyAction.NONE)  # new trial
+
+    events.extend(
+        [
+            ev(EventType.OUTCOME_REPORTED, session="f3", outcome="failure"),
+            ev(EventType.OUTCOME_REPORTED, session="f4", outcome="failure"),
+        ]
+    )
+    assert evaluate(V, None, events).action is PolicyAction.ARCHIVE
+
+
+def test_content_update_clears_prior_demotion() -> None:
+    events = [
+        created(),
+        ev(EventType.DEMOTED, actor="policy"),
+        ev(EventType.UPDATED, session="editor"),
+        ev(EventType.OUTCOME_REPORTED, session="f1", outcome="failure"),
+        ev(EventType.OUTCOME_REPORTED, session="f2", outcome="failure"),
+    ]
+    assert evaluate(V, None, events).action is PolicyAction.DEMOTE

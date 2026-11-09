@@ -18,13 +18,19 @@ Thresholds live in `TrustPolicyConfig` and are not part of the wire contract.
   current content never counts for its own corroboration, verification, or
   success. `require_distinct_models=True` counts distinct models instead,
   excluding the author's model.
-- **Counting window** starts at the latest content event (`CREATED`/`UPDATED`).
-  Verification and lifecycle events bump the record revision but do not reset
-  counts; a content change does.
+- Verification and lifecycle events bump the record revision but do not reset
+  counts; a content change or demotion does.
 - **Failures** (failure outcomes, failed/rejected verifications) are counted by
-  distinct `(actor, session)`. Any failure blocks advancement. Two failures
-  archive a candidate/verified item. On canonical knowledge, one failure emits
-  `REVALIDATION_REQUESTED` and two deprecate it.
+  distinct `(actor, session)`. Any failure blocks advancement (strict for now;
+  a success/failure ratio rule is planned once real data exists).
+  - Candidate: two failures archive it.
+  - Verified: two failures **demote it to candidate** (`DEMOTED`); the recorded
+    verification is cleared and a fresh trial starts. If the same content fails
+    a second trial, it is archived.
+  - Canonical: one failure emits `REVALIDATION_REQUESTED` (still served); two
+    deprecate it.
+- **Counting window** for each trial starts at the latest content change or
+  demotion, whichever is later.
 - The reserved actors `policy` and `operator` are never counted as independent.
 - The policy (`kasane.trust.policy.evaluate`) is a pure function of status and
   events. It never sets `canonical`.

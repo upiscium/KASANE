@@ -38,6 +38,7 @@ class PolicyAction(StrEnum):
     PROMOTE_VERIFIED = "promote_verified"
     REQUEST_REVALIDATION = "request_revalidation"
     DEPRECATE = "deprecate"
+    DEMOTE = "demote"
     ARCHIVE = "archive"
 
 
@@ -126,7 +127,7 @@ def evaluate(
     config: TrustPolicyConfig | None = None,
 ) -> TrustAssessment:
     config = config or DEFAULT_POLICY
-    window, author = _current_content_window(events)
+    window, author, demoted_before = _current_window(events)
     author_key = author.key if author else None
 
     corroborators: list[Participant] = []
@@ -185,7 +186,9 @@ def evaluate(
                 action = PolicyAction.VERIFY_BY_CORROBORATION
     elif status is KnowledgeStatus.VERIFIED:
         if n_failures >= config.failures_to_retire:
-            action = PolicyAction.ARCHIVE
+            # First time: send back to candidate for a fresh trial. A second
+            # failed trial of the same content retires it.
+            action = PolicyAction.ARCHIVE if demoted_before else PolicyAction.DEMOTE
         approval_eligible = (
             n_failures == 0 and n_successes >= config.successes_for_approval
         )
@@ -213,17 +216,28 @@ def evaluate(
     )
 
 
-def _current_content_window(
+def _current_window(
     events: Sequence[KnowledgeEvent],
-) -> tuple[Sequence[KnowledgeEvent], Participant | None]:
-    """Events after the latest content change, plus that change's author."""
+) -> tuple[Sequence[KnowledgeEvent], Participant | None, bool]:
+    """Signals of the current trial, the content author, and prior demotion.
 
+    The trial starts after the latest content change or demotion, whichever is
+    later. The author is always the latest content change's author.
+    """
+
+    start = 0
+    author: Participant | None = None
+    demoted_before = False
     for index in range(len(events) - 1, -1, -1):
         event = events[index]
-        if event.event_type in CONTENT_EVENTS:
+        if event.event_type is EventType.DEMOTED:
+            demoted_before = True
+            start = max(start, index + 1)
+        elif event.event_type in CONTENT_EVENTS:
             author = participant_from_metadata(event.actor, event.metadata)
-            return events[index + 1 :], author
-    return events, None
+            start = max(start, index + 1)
+            break
+    return events[start:], author, demoted_before
 
 
 def _independence_counter(

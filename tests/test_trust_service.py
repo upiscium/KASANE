@@ -200,3 +200,32 @@ def test_distinct_model_config_applies_end_to_end(tmp_path: Path) -> None:
     assert result.record.status is KnowledgeStatus.CANDIDATE
     result = service.signal(signal("corroboration"), agent("c", model="m3"))
     assert result.record.status is KnowledgeStatus.VERIFIED
+
+
+def test_verified_failures_demote_to_candidate_then_archive(
+    service: TrustService,
+) -> None:
+    def verify(session: str) -> None:
+        service.signal(
+            signal("verification", verification="passed", note="ok"), agent(session)
+        )
+
+    def fail(session: str) -> Any:
+        return service.signal(
+            signal("outcome", outcome="failure", note="did not hold"), agent(session)
+        )
+
+    service.propose(proposal(), AUTHOR)
+    verify("v1")
+    fail("f1")
+    demoted = fail("f2")
+    assert demoted.record.status is KnowledgeStatus.CANDIDATE
+    assert demoted.record.verification_outcome is None
+    assert demoted.assessment.failures == 0
+    assert service.repository.list_events(REF)[-1].event_type is EventType.DEMOTED
+
+    verify("v2")
+    assert service.assess(REF).record.status is KnowledgeStatus.VERIFIED
+    fail("f3")
+    archived = fail("f4")
+    assert archived.record.status is KnowledgeStatus.ARCHIVED
