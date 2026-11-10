@@ -78,7 +78,10 @@ main route to corroboration is the near-duplicate refusal of `kasane_propose`.
 ## Running
 
 ```sh
-# Development Vault seeded from the Level 0 fixture (refuses existing files)
+# Real use: empty Vault (see "Getting started" below)
+uv run kasane-admin init
+
+# Development only: Vault seeded with synthetic fixture knowledge
 uv run kasane-mcp seed-fixture --vault ~/.local/share/kasane/dev.db
 
 # Serve over stdio
@@ -91,32 +94,95 @@ the server fails at startup rather than silently creating an empty Vault.
 next to the Vault). `seed-fixture` defaults to the in-repo fixture; pass
 `--fixture` when running from an installed wheel.
 
-## Registering with a client
+## Getting started (real use)
 
-Adjust paths to your checkout and Vault. These snippets follow each client's
-documented config shape but have not yet been exercised against every client
-version.
+1. **Create the Vault** (empty; safe to re-run):
 
-OpenCode (`opencode.json`):
+   ```sh
+   uv run --directory /path/to/KASANE kasane-admin init
+   # -> vault: ~/.local/state/kasane/vault.db (or $KASANE_DATA_ROOT/vault.db)
+   ```
 
-```json
-{
-  "mcp": {
-    "kasane": {
-      "type": "local",
-      "command": ["uv", "run", "--directory", "/path/to/KASANE", "kasane-mcp", "serve"],
-      "environment": { "KASANE_VAULT_PATH": "/path/to/dev.db" }
-    }
-  }
-}
-```
+2. **Register the server** with your agent client. Set `KASANE_ACTOR` to a
+   stable name per client and `KASANE_MODEL` to the model it runs; leave
+   `KASANE_SESSION` unset so each client process is its own session.
 
-Claude Code:
+   OpenCode (`opencode.json`; shape from the
+   [OpenCode MCP docs](https://opencode.ai/docs/mcp-servers), which use
+   `mcp.servers`, `environment` and `disabled`; check against your version):
 
-```sh
-claude mcp add kasane -e KASANE_VAULT_PATH=/path/to/dev.db \
-  -- uv run --directory /path/to/KASANE kasane-mcp serve
-```
+   ```json
+   {
+     "mcp": {
+       "servers": {
+         "kasane": {
+           "type": "local",
+           "command": [
+             "uv", "run", "--directory", "/path/to/KASANE", "kasane-mcp", "serve",
+             "--allow-write",
+             "--default-scope", "global", "--default-scope", "project/<project>"
+           ],
+           "environment": {
+             "KASANE_VAULT_PATH": "/home/<you>/.local/state/kasane/vault.db",
+             "KASANE_ACTOR": "opencode",
+             "KASANE_MODEL": "<model-id>"
+           }
+         }
+       }
+     }
+   }
+   ```
+
+   Claude Code: use `add-json`. The `claude mcp add -e KEY=VAL name -- cmd`
+   form shown by `--help` mis-parses `-e` in some versions
+   ([anthropics/claude-code#62332](https://github.com/anthropics/claude-code/issues/62332)).
+
+   ```sh
+   claude mcp add-json -s user kasane '{
+     "type": "stdio",
+     "command": "uv",
+     "args": ["run", "--directory", "/path/to/KASANE", "kasane-mcp", "serve",
+              "--allow-write", "--default-scope", "global",
+              "--default-scope", "project/<project>"],
+     "env": {
+       "KASANE_VAULT_PATH": "/home/<you>/.local/state/kasane/vault.db",
+       "KASANE_ACTOR": "claude-code",
+       "KASANE_MODEL": "<model-id>"
+     }
+   }'
+   ```
+
+   Registering two different clients (or models) gives the trust model the
+   independent writers it needs; one client alone can still reach T1/T2 via
+   separate sessions, which is the documented weak-independence risk.
+
+3. **Tell the agent how to use it.** Agents rarely call new tools unprompted.
+   Add to the project's `AGENTS.md` / `CLAUDE.md`:
+
+   ```markdown
+   ## KASANE knowledge
+   - Before designing or debugging, call `kasane_retrieve` with the task as the
+     query (budget e.g. 2000 tokens / 8000 bytes / 5 items). Treat T0–T2 items
+     as hints to check, T3 as approved.
+   - After applying a retrieved item, call `kasane_report_outcome` with
+     success or failure and one line on the task. Report failures too.
+   - When you establish a reusable procedure, design rule, situational fix,
+     pitfall, or constraint, call `kasane_propose` with
+     `vault://project/<project>/<kind>/<slug>`, at least one source, and the
+     situation it applies to in the body. If it is refused as
+     `near_duplicate`, corroborate the match only if you derived it yourself.
+   - Never store secrets, credentials, or personal data.
+   ```
+
+4. **Watch it** with `kasane-admin` (same `KASANE_VAULT_PATH`):
+
+   ```sh
+   kasane-admin status          # counts, gates, queue size
+   kasane-admin events --limit 50
+   kasane-admin queue           # T2 items waiting for your approve/reject
+   ```
+
+   Emergency: `kasane-admin freeze --reason "..."` (see docs/trust.md).
 
 ## Example
 

@@ -395,3 +395,21 @@ def test_swallowed_policy_failure_is_logged(
     with caplog.at_level("WARNING", logger="kasane.trust.service"):
         service.signal(signal("corroboration"), agent("a"))
     assert "reconcile will retry" in caplog.text
+
+
+def test_init_creates_an_empty_vault_and_is_safe_to_rerun(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    target = tmp_path / "nested" / "vault.db"
+    first = run(target, "init", capsys=capsys)
+    assert (first["created"], first["knowledge"]) == (True, 0)
+    assert first["schema_version"] == 4
+    again = run(target, "init", capsys=capsys)
+    assert again["created"] is False
+    # Default location follows KASANE_DATA_ROOT when --vault is omitted.
+    monkeypatch.delenv("KASANE_VAULT_PATH", raising=False)
+    monkeypatch.setenv("KASANE_DATA_ROOT", str(tmp_path / "root"))
+    assert admin_main(["--json", "init"]) == 0
+    created = json.loads(capsys.readouterr().out)
+    assert created["vault"] == str(tmp_path / "root" / "vault.db")
+    assert (tmp_path / "root" / "vault.db").is_file()

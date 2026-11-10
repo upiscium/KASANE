@@ -33,6 +33,8 @@ EXCERPT_CHARS = 160
 def main(argv: Sequence[str] | None = None) -> int:
     parser = _parser()
     args = parser.parse_args(argv)
+    if args.command == "init":
+        return _init(args)
     service = TrustService(
         VaultRepository(_require_vault(parser, args.vault)), TrustPolicyConfig()
     )
@@ -51,6 +53,11 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--json", action="store_true", help="machine-readable output")
     sub = parser.add_subparsers(dest="command", required=True)
 
+    sub.add_parser(
+        "init",
+        help="create an empty Vault (default: $KASANE_DATA_ROOT or "
+        "~/.local/state/kasane/vault.db); safe to re-run",
+    )
     sub.add_parser("status", help="write gates, counts by status, queue size")
     sub.add_parser("queue", help="T2 items awaiting human approval")
 
@@ -138,6 +145,22 @@ def _dispatch(service: TrustService, args: argparse.Namespace) -> Any:
             "vouched_for_review": plan.vouched,
         }
     raise AssertionError(command)  # pragma: no cover - argparse restricts choices
+
+
+def _init(args: argparse.Namespace) -> int:
+    from kasane.vault.config import default_database_path
+
+    path = Path(args.vault).expanduser() if args.vault else default_database_path()
+    existed = path.is_file()
+    repository = VaultRepository(path)  # creates, or migrates an existing Vault
+    payload = {
+        "vault": str(repository.database_path),
+        "created": not existed,
+        "schema_version": repository.current_schema_version(),
+        "knowledge": len(repository.list_knowledge()),
+    }
+    _emit(payload, as_json=args.json)
+    return 0
 
 
 def _status(service: TrustService) -> dict[str, Any]:
