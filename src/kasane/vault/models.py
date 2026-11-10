@@ -89,3 +89,24 @@ class KnowledgeEvent:
     timestamp: str
     event_type: EventType
     metadata: JsonValue
+
+
+@dataclass(frozen=True)
+class OperatorAction:
+    """One entry of the append-only operator action log (schema v4)."""
+
+    sequence: int
+    action: str
+    target: str | None
+    reason: str
+    details: JsonValue
+    actor: str
+    timestamp: str
+
+
+@dataclass(frozen=True)
+class WriteControls:
+    """Write gates derived from the operator action log."""
+
+    frozen: bool
+    blocked_actors: frozenset[str]

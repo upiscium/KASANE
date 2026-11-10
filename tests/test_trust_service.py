@@ -141,9 +141,9 @@ def test_reconcile_applies_policy_left_behind(service: TrustService) -> None:
             metadata=agent(session).metadata(),
         )
     assert service.assess(REF).record.status is KnowledgeStatus.CANDIDATE
-    assert service.reconcile() == [REF]
+    assert service.reconcile().changed == [REF]
     assert service.assess(REF).record.status is KnowledgeStatus.VERIFIED
-    assert service.reconcile() == []  # idempotent
+    assert service.reconcile().changed == []  # idempotent
 
 
 def test_canonical_failures_revalidate_then_deprecate(service: TrustService) -> None:
@@ -307,9 +307,9 @@ def test_reconcile_reports_signal_only_policy_actions(tmp_path: Path) -> None:
     _to_t2(service)
     service.approve(REF)
     _raw_failure(service, "f1")  # recorded without running the policy
-    assert service.reconcile() == [REF]
+    assert service.reconcile().changed == [REF]
     assert service.assess(REF).assessment.revalidation_requested
-    assert service.reconcile() == []
+    assert service.reconcile().changed == []
 
 
 def test_operator_failed_verification_blocks_corroboration_path(
@@ -400,7 +400,7 @@ def test_policy_contention_is_best_effort_and_reconcile_converges(
     result = service.signal(signal("corroboration"), agent("b"))  # must not raise
     monkeypatch.undo()
     assert result.record.status is KnowledgeStatus.CANDIDATE  # guard held
-    assert service.reconcile() == [REF]
+    assert service.reconcile().changed == [REF]
     assert service.assess(REF).record.status is KnowledgeStatus.VERIFIED
 
 
@@ -453,7 +453,7 @@ def test_reconcile_reports_committed_verification_even_if_promotion_blocked(
         return committed
 
     service.repository.record_verification = verify_then_fail  # type: ignore[method-assign]
-    assert service.reconcile() == [REF]
+    assert service.reconcile().changed == [REF]
     assert service.assess(REF).record.status is KnowledgeStatus.CANDIDATE
 
 

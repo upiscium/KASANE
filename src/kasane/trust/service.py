@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import logging
 import sqlite3
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from kasane.contracts import validate_contract
@@ -84,6 +85,24 @@ class AgentContext:
         return {"agent": {"session": self.session, "model": self.model}, **extra}
 
 
+_LOG = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class ReconcileResult:
+    changed: list[str]
+    skipped: list[str]
+
+
+@dataclass(frozen=True)
+class QuarantinePlan:
+    targets: list[str]  # will be (or were) archived
+    vouched: list[str]  # live knowledge the actor vouched for: review these
+    archived: list[str]
+    failed: list[str]
+    applied: bool
+
+
 @dataclass(frozen=True)
 class TrustResult:
     record: KnowledgeRecord
@@ -126,6 +145,7 @@ class TrustService:
     def _propose_unchecked(
         self, proposal: Mapping[str, Any], agent: AgentContext
     ) -> TrustResult:
+        self._require_open(agent)
         validate_contract(PROPOSAL_SCHEMA, proposal)
         ref = str(proposal["knowledge_ref"])
         self._require_writable(ref)
@@ -173,6 +193,7 @@ class TrustService:
     def _signal_unchecked(
         self, signal: Mapping[str, Any], agent: AgentContext
     ) -> TrustResult:
+        self._require_open(agent)
         validate_contract(SIGNAL_SCHEMA, signal)
         ref = str(signal["knowledge_ref"])
         self._require_writable(ref)
@@ -187,7 +208,18 @@ class TrustService:
             raise TrustRejectedError(
                 f"{ref} changed concurrently; re-read and retry"
             ) from error
-        self._apply_policy(ref)
+        # The signal is committed from here on. A failing policy step must not
+        # be reported as a refusal (the agent would retry and duplicate it);
+        # reconcile() finishes the policy later.
+        try:
+            self._apply_policy(ref)
+        except (VaultError, sqlite3.Error):
+            _LOG.warning(
+                "policy step for %s failed after its signal committed; "
+                "kasane-admin reconcile will retry",
+                ref,
+                exc_info=True,
+            )
         return self.assess(ref)
 
     def _record_signal(
@@ -303,8 +335,8 @@ class TrustService:
         )
         return self.assess(knowledge_ref)
 
-    def reconcile(self) -> list[str]:
-        """Re-apply the policy to every live record; return refs that changed.
+    def reconcile(self) -> ReconcileResult:
+        """Re-apply the policy to every live record; report changed and skipped.
 
         Signal recording and policy transitions are separate transactions, so
         a crash in between can leave a record behind its policy state. The
@@ -312,18 +344,187 @@ class TrustService:
         """
 
         changed: list[str] = []
+        skipped: list[str] = []
         for record in self.repository.list_knowledge():
             if record.status in (KnowledgeStatus.DEPRECATED, KnowledgeStatus.ARCHIVED):
                 continue
             try:
                 acted = self._apply_policy(record.knowledge_ref)
             except VaultError:
-                continue  # one bad record must not stop the sweep
+                skipped.append(record.knowledge_ref)  # surfaced, sweep continues
+                continue
             if acted:
                 changed.append(record.knowledge_ref)
-        return changed
+        return ReconcileResult(changed=changed, skipped=skipped)
+
+    # Emergency controls (operator only) -------------------------------
+
+    def freeze(self, *, reason: str) -> None:
+        """Refuse every agent write until unfreeze(). Operator actions continue."""
+
+        self._log("FREEZE", reason)
+
+    def unfreeze(self, *, reason: str) -> None:
+        self._log("UNFREEZE", reason)
+
+    def block(self, actor: str, *, reason: str) -> None:
+        """Refuse all future writes from one writer identity."""
+
+        if actor != actor.strip() or not actor or actor in RESERVED_ACTORS:
+            # Whitespace would make a block that never matches any writer.
+            raise TrustRejectedError(f"cannot block {actor!r}")
+        self._log("BLOCK_ACTOR", reason, target=actor)
+
+    def unblock(self, actor: str, *, reason: str) -> None:
+        self._log("UNBLOCK_ACTOR", reason, target=actor)
+
+    def quarantine(
+        self,
+        *,
+        reason: str,
+        actor: str | None = None,
+        since: str | None = None,
+        refs: Sequence[str] = (),
+        apply: bool = False,
+    ) -> QuarantinePlan:
+        with _refusing():
+            return self._quarantine_unchecked(
+                reason=reason, actor=actor, since=since, refs=refs, apply=apply
+            )
+
+    def _quarantine_unchecked(
+        self,
+        *,
+        reason: str,
+        actor: str | None,
+        since: str | None,
+        refs: Sequence[str],
+        apply: bool,
+    ) -> QuarantinePlan:
+        """Archive knowledge authored by ``actor`` (since ``since``) and ``refs``.
+
+        Also reports live knowledge the actor vouched for (corroborations,
+        passed verifications, successes), which may need review. Dry run unless
+        ``apply``; applying is logged once as a QUARANTINE operator action.
+        """
+
+        if not reason.strip():
+            raise TrustRejectedError("quarantine requires a reason")
+        for ref in refs:
+            parse_knowledge_ref(ref)  # malformed refs refused before any work
+        if actor is None and not refs:
+            raise TrustRejectedError("quarantine needs --actor or at least one --ref")
+        cutoff = None if since is None else _parse_since(since)
+        targets: list[str] = []
+        vouched: list[str] = []
+        for record in self.repository.list_knowledge():
+            if record.status is KnowledgeStatus.ARCHIVED:
+                continue
+            events = self.repository.list_events(record.knowledge_ref)
+            if record.knowledge_ref in refs or (
+                actor is not None and _authored_by(events, actor, cutoff)
+            ):
+                targets.append(record.knowledge_ref)
+            elif actor is not None and _vouched_by(events, actor, cutoff):
+                vouched.append(record.knowledge_ref)
+        unknown = [ref for ref in refs if ref not in targets]
+        for ref in unknown:
+            self._get(ref)  # raises for unknown refs; archived refs are no-ops
+        archived: list[str] = []
+        failed: list[str] = []
+        if apply:
+            try:
+                for ref in targets:
+                    try:
+                        self._archive_now(ref, reason)
+                        archived.append(ref)
+                    except (StaleRevisionError, TrustRejectedError, VaultError):
+                        failed.append(ref)
+            finally:
+                # Logged even if the sweep aborts (e.g. database locked), so
+                # what was archived is always on record.
+                done = set(archived) | set(failed)
+                failed.extend([ref for ref in targets if ref not in done])
+                self._log_quarantine(
+                    reason, actor, since, refs, archived, failed, vouched
+                )
+        return QuarantinePlan(
+            targets=targets,
+            vouched=vouched,
+            archived=archived,
+            failed=failed,
+            applied=apply,
+        )
+
+    def _log_quarantine(
+        self,
+        reason: str,
+        actor: str | None,
+        since: str | None,
+        refs: Sequence[str],
+        archived: list[str],
+        failed: list[str],
+        vouched: list[str],
+    ) -> None:
+        self._log(
+            "QUARANTINE",
+            reason,
+            target=actor,
+            details={
+                "since": since,
+                "refs": _json_list(refs),
+                "archived": _json_list(archived),
+                "failed": _json_list(failed),
+                "vouched": _json_list(vouched),
+            },
+        )
 
     # Internals ---------------------------------------------------------
+
+    def _require_open(self, agent: AgentContext) -> None:
+        controls = self.repository.write_controls()
+        if controls.frozen:
+            raise TrustRejectedError("vault is frozen by the operator; writes refused")
+        if agent.actor in controls.blocked_actors:
+            raise TrustRejectedError(
+                f"writer {agent.actor!r} is blocked by the operator"
+            )
+
+    def _log(
+        self,
+        action: str,
+        reason: str,
+        *,
+        target: str | None = None,
+        details: dict[str, JsonValue] | None = None,
+    ) -> None:
+        if not reason.strip():
+            raise TrustRejectedError(f"{action.lower()} requires a reason")
+        self.repository.record_operator_action(
+            action, reason=reason, actor=OPERATOR_ACTOR, target=target, details=details
+        )
+
+    def _archive_now(self, knowledge_ref: str, reason: str) -> None:
+        """Retire a record immediately: canonical goes via deprecated."""
+
+        metadata: dict[str, JsonValue] = {"decision": "quarantine", "reason": reason}
+        record = self._get(knowledge_ref)
+        if record.status is KnowledgeStatus.CANONICAL:
+            self.repository.transition_lifecycle(
+                knowledge_ref,
+                KnowledgeStatus.DEPRECATED,
+                expected_revision=record.revision,
+                actor=OPERATOR_ACTOR,
+                event_metadata=metadata,
+            )
+            record = self._get(knowledge_ref)
+        self.repository.transition_lifecycle(
+            knowledge_ref,
+            KnowledgeStatus.ARCHIVED,
+            expected_revision=record.revision,
+            actor=OPERATOR_ACTOR,
+            event_metadata=metadata,
+        )
 
     def _operator_transition(
         self,
@@ -511,3 +712,69 @@ def _refusing() -> Iterator[None]:
         ) from error
     except VaultError as error:
         raise TrustRejectedError(str(error)) from error
+
+
+_POSITIVE = {
+    (EventType.CORROBORATED, None),
+    (EventType.VERIFICATION_RECORDED, "passed"),
+    (EventType.OUTCOME_REPORTED, "success"),
+}
+
+
+def _parse_since(value: str) -> datetime:
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError as error:
+        raise TrustRejectedError(f"since is not ISO 8601: {value}") from error
+    if parsed.tzinfo is None:
+        raise TrustRejectedError("since must include a timezone")
+    return parsed
+
+
+def parse_since(value: str) -> datetime:
+    """Public for the admin CLI: an aware ISO 8601 cutoff or TrustRejectedError."""
+
+    return _parse_since(value)
+
+
+def _at_or_after(timestamp: str, cutoff: datetime | None) -> bool:
+    if cutoff is None:
+        return True
+    try:
+        parsed = datetime.fromisoformat(timestamp)
+    except ValueError:
+        return True  # unparseable: err on the side of including it
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)  # never compare naive with aware
+    return parsed >= cutoff
+
+
+def _authored_by(events: Sequence[Any], actor: str, cutoff: datetime | None) -> bool:
+    content = [
+        e for e in events if e.event_type in (EventType.CREATED, EventType.UPDATED)
+    ]
+    return (
+        bool(content)
+        and content[-1].actor == actor
+        and _at_or_after(content[-1].timestamp, cutoff)
+    )
+
+
+def _vouched_by(events: Sequence[Any], actor: str, cutoff: datetime | None) -> bool:
+    for event in events:
+        if event.actor != actor or not _at_or_after(event.timestamp, cutoff):
+            continue
+        outcome = (
+            event.metadata.get("outcome") if isinstance(event.metadata, dict) else None
+        )
+        key = (
+            event.event_type,
+            None if event.event_type is EventType.CORROBORATED else outcome,
+        )
+        if key in _POSITIVE:
+            return True
+    return False
+
+
+def _json_list(values: Sequence[str]) -> list[JsonValue]:
+    return list(values)

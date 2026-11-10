@@ -68,8 +68,8 @@ enable `require_distinct_models` once several models write.
 a scoped writer never sees or is blocked by knowledge outside its scopes.
 Omitting it allows writes to every namespace, including `private/*`.
 
-**Before enabling writes in real use:** there is no emergency stop until
-`kasane-admin freeze`/`quarantine` lands.
+**Emergency stop:** `kasane-admin freeze` refuses all agent writes;
+`block`/`quarantine` handle a single writer (docs/trust.md).
 
 **Discovery:** verified knowledge (T1/T2) is returned by default, so agents can
 report outcomes on it. Candidates (T0) appear only with `min_trust: "T0"`; their
@@ -137,6 +137,5 @@ Against the seeded dev Vault this returns a ~1.2 KB capsule whose
 
 ## Not yet supported
 
-Human approval tooling (`kasane-admin`), Level 1/2, HTTP transport, and
-authentication. Scope selectors narrow retrieval but never
+Level 1/2 over MCP, HTTP transport, and authentication. Scope selectors narrow retrieval but never
 grant access, so do not expose this server to untrusted callers.

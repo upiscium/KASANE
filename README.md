@@ -13,7 +13,7 @@ lookup.
 - Vault Core: [`docs/vault-core.md`](docs/vault-core.md)
 - Level 0 retrieval: [`docs/level-0-retrieval.md`](docs/level-0-retrieval.md)
 - MCP server (`kasane-mcp`): [`docs/mcp.md`](docs/mcp.md)
-- Trust lifecycle (tiers, policy): [`docs/trust.md`](docs/trust.md)
+- Trust lifecycle (tiers, policy) and operator tools (`kasane-admin`): [`docs/trust.md`](docs/trust.md)
 
 ## Package naming
 

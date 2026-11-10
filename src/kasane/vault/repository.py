@@ -25,7 +25,9 @@ from .models import (
     KnowledgeEvent,
     KnowledgeRecord,
     KnowledgeStatus,
+    OperatorAction,
     VerificationOutcome,
+    WriteControls,
 )
 
 Clock = Callable[[], str]
@@ -407,6 +409,127 @@ class VaultRepository:
             if event.event_id == event_id
         )
 
+    def record_operator_action(
+        self,
+        action: str,
+        *,
+        reason: str,
+        actor: str,
+        target: str | None = None,
+        details: JsonValue | None = None,
+    ) -> OperatorAction:
+        """Append an operator action (freeze, block, quarantine) to the log."""
+
+        timestamp = self._clock()
+        details_json = canonical_json(require_json(details or {}))
+        with self._transaction() as connection:
+            cursor = connection.execute(
+                """
+                INSERT INTO operator_actions(
+                    action, target, reason, details_json, actor, timestamp
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (action, target, reason, details_json, actor, timestamp),
+            )
+            sequence = int(cursor.lastrowid or 0)
+        return OperatorAction(
+            sequence, action, target, reason, parse_json(details_json), actor, timestamp
+        )
+
+    def list_operator_actions(self) -> list[OperatorAction]:
+        with self._connection() as connection:
+            rows = connection.execute(
+                """
+                SELECT sequence, action, target, reason, details_json, actor, timestamp
+                FROM operator_actions ORDER BY sequence
+                """
+            ).fetchall()
+        return [
+            OperatorAction(
+                row["sequence"],
+                row["action"],
+                row["target"],
+                row["reason"],
+                parse_json(row["details_json"]),
+                row["actor"],
+                row["timestamp"],
+            )
+            for row in rows
+        ]
+
+    def write_controls(self) -> WriteControls:
+        """Current freeze flag and blocked actors, folded from the action log."""
+
+        frozen = False
+        blocked: set[str] = set()
+        for action in self.list_operator_actions():
+            if action.action == "FREEZE":
+                frozen = True
+            elif action.action == "UNFREEZE":
+                frozen = False
+            elif action.action == "BLOCK_ACTOR" and action.target:
+                blocked.add(action.target)
+            elif action.action == "UNBLOCK_ACTOR" and action.target:
+                blocked.discard(action.target)
+        return WriteControls(frozen=frozen, blocked_actors=frozenset(blocked))
+
+    def search_events(
+        self,
+        *,
+        actor: str | None = None,
+        knowledge_ref: str | None = None,
+        since: datetime | None = None,
+        limit: int = 200,
+    ) -> list[KnowledgeEvent]:
+        """The newest ``limit`` matching events, returned oldest first.
+
+        Scans newest-first so large logs never hide recent events behind a
+        cap; ``since`` is compared as a parsed timestamp (naive values are
+        treated as UTC), never as a string.
+        """
+
+        clauses: list[str] = []
+        params: list[Any] = []
+        if actor is not None:
+            clauses.append("actor = ?")
+            params.append(actor)
+        if knowledge_ref is not None:
+            parse_knowledge_ref(knowledge_ref)
+            clauses.append("knowledge_ref = ?")
+            params.append(knowledge_ref)
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        wanted = max(1, limit)
+        selected: list[sqlite3.Row] = []
+        with self._connection() as connection:
+            cursor = connection.execute(
+                f"""
+                SELECT event_id, knowledge_ref, revision, actor, timestamp, event_type,
+                       metadata_json
+                FROM knowledge_events {where}
+                ORDER BY event_sequence DESC
+                """,
+                params,
+            )
+            for row in cursor:
+                if since is not None and not _at_or_after(row["timestamp"], since):
+                    continue
+                selected.append(row)
+                if len(selected) >= wanted:
+                    break
+        rows = list(reversed(selected))
+        return [
+            KnowledgeEvent(
+                event_id=row["event_id"],
+                knowledge_ref=row["knowledge_ref"],
+                revision=row["revision"],
+                actor=row["actor"],
+                timestamp=row["timestamp"],
+                event_type=EventType(row["event_type"]),
+                metadata=parse_json(row["metadata_json"]),
+            )
+            for row in rows
+        ]
+
     def list_events(self, knowledge_ref: str) -> list[KnowledgeEvent]:
         parse_knowledge_ref(knowledge_ref)
         with self._connection() as connection:
@@ -595,3 +718,17 @@ class VaultRepository:
             updated_at=row["updated_at"],
             revision=row["revision"],
         )
+
+
+def _at_or_after(timestamp: str, cutoff: datetime) -> bool:
+    """Compare stored timestamps as instants; unparseable values are included."""
+
+    try:
+        parsed = datetime.fromisoformat(timestamp)
+    except ValueError:
+        return True
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    if cutoff.tzinfo is None:
+        cutoff = cutoff.replace(tzinfo=UTC)
+    return parsed >= cutoff
