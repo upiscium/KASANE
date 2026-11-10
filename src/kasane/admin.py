@@ -58,7 +58,7 @@ def _parser() -> argparse.ArgumentParser:
     sub.add_parser(
         "init",
         help="create an empty Vault (default: $KASANE_DATA_ROOT or "
-        "~/.local/state/kasane/vault.db); safe to re-run",
+        "~/.local/state/KASANE/vault.db); safe to re-run",
     )
     sub.add_parser("status", help="write gates, counts by status, queue size")
     sub.add_parser("queue", help="T2 items awaiting human approval")

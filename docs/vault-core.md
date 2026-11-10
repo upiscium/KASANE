@@ -7,8 +7,8 @@ Vault Core is the canonical, transactional knowledge state boundary. Retrieval i
 v0.1 uses Python's SQLite driver with WAL mode and foreign-key enforcement on every connection. The repository accepts an explicit database path. Without one it resolves, in order:
 
 1. `KASANE_DATA_ROOT/vault.db`
-2. `$XDG_STATE_HOME/kasane/vault.db`
-3. `~/.local/state/kasane/vault.db`
+2. `$XDG_STATE_HOME/KASANE/vault.db`
+3. `~/.local/state/KASANE/vault.db`
 
 Runtime databases therefore do not belong in the Git worktree. Tests use temporary database files.
 
