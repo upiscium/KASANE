@@ -11,7 +11,8 @@ import json
 import os
 import sqlite3
 import sys
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -33,12 +34,15 @@ EXCERPT_CHARS = 160
 def main(argv: Sequence[str] | None = None) -> int:
     parser = _parser()
     args = parser.parse_args(argv)
-    service = TrustService(
-        VaultRepository(_require_vault(parser, args.vault)), TrustPolicyConfig()
-    )
     try:
-        payload = _dispatch(service, args)
-    except (TrustRejectedError, VaultError, ValueError, sqlite3.Error) as exc:
+        if args.command == "init":
+            payload = _init(parser, args)
+        else:
+            service = TrustService(
+                VaultRepository(_require_vault(parser, args.vault)), TrustPolicyConfig()
+            )
+            payload = _dispatch(service, args)
+    except (TrustRejectedError, VaultError, ValueError, sqlite3.Error, OSError) as exc:
         # Operator input errors and refusals: a message, never a traceback.
         parser.exit(1, f"kasane-admin: {exc}\n")
     _emit(payload, as_json=args.json)
@@ -51,6 +55,11 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--json", action="store_true", help="machine-readable output")
     sub = parser.add_subparsers(dest="command", required=True)
 
+    sub.add_parser(
+        "init",
+        help="create an empty Vault (default: $KASANE_DATA_ROOT or "
+        "~/.local/state/kasane/vault.db); safe to re-run",
+    )
     sub.add_parser("status", help="write gates, counts by status, queue size")
     sub.add_parser("queue", help="T2 items awaiting human approval")
 
@@ -140,6 +149,59 @@ def _dispatch(service: TrustService, args: argparse.Namespace) -> Any:
     raise AssertionError(command)  # pragma: no cover - argparse restricts choices
 
 
+def _init(parser: argparse.ArgumentParser, args: argparse.Namespace) -> dict[str, Any]:
+    path = _vault_path(args.vault)
+    if path.exists() and not path.is_file():
+        parser.exit(1, f"kasane-admin: not a file: {path}\n")
+    before = _schema_version_of(path) if path.is_file() else None
+    if before == 0 and _has_tables(path):
+        # An unversioned SQLite file with tables is someone else's database.
+        parser.exit(1, f"kasane-admin: not a KASANE Vault: {path}\n")
+    repository = VaultRepository(path)  # creates, or migrates an existing Vault
+    after = repository.current_schema_version()
+    payload: dict[str, Any] = {
+        "vault": str(repository.database_path),
+        "created": before is None,
+        "schema_version": after,
+        "knowledge": len(repository.list_knowledge()),
+    }
+    if before is not None and before != after:
+        payload["migrated_from"] = before
+    return payload
+
+
+def _schema_version_of(path: Path) -> int:
+    """Read the schema version without migrating (0 for an unversioned file)."""
+
+    with _read_only(path) as connection:
+        return int(connection.execute("PRAGMA user_version").fetchone()[0])
+
+
+def _has_tables(path: Path) -> bool:
+    with _read_only(path) as connection:
+        row = connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' LIMIT 1"
+        ).fetchone()
+        return row is not None
+
+
+@contextmanager
+def _read_only(path: Path) -> Iterator[sqlite3.Connection]:
+    # as_uri() percent-encodes '#', '?' and '%', which a raw f"file:{path}"
+    # URI would treat as fragment/query and silently open another file.
+    connection = sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True)
+    try:
+        yield connection
+    finally:
+        connection.close()
+
+
+def _vault_path(value: str | None) -> Path:
+    from kasane.vault.config import default_database_path
+
+    return Path(value).expanduser() if value else default_database_path()
+
+
 def _status(service: TrustService) -> dict[str, Any]:
     controls = service.repository.write_controls()
     counts = {status.value: 0 for status in KnowledgeStatus}
@@ -220,11 +282,14 @@ def _line(item: dict[str, Any]) -> str:
 
 
 def _require_vault(parser: argparse.ArgumentParser, value: str | None) -> Path:
-    if not value:
-        parser.exit(2, f"kasane-admin: set --vault or {VAULT_ENV}\n")
-    path = Path(value).expanduser()
+    # Same default as `init`, so `init` then `status` works with no settings.
+    path = _vault_path(value)
     if not path.is_file():
-        parser.exit(2, f"kasane-admin: Vault DB not found: {path}\n")
+        parser.exit(
+            2,
+            f"kasane-admin: Vault DB not found: {path} "
+            f"(run `kasane-admin init`, or set --vault / {VAULT_ENV})\n",
+        )
     return path
 
 

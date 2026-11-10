@@ -395,3 +395,104 @@ def test_swallowed_policy_failure_is_logged(
     with caplog.at_level("WARNING", logger="kasane.trust.service"):
         service.signal(signal("corroboration"), agent("a"))
     assert "reconcile will retry" in caplog.text
+
+
+def test_init_creates_an_empty_vault_and_is_safe_to_rerun(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    target = tmp_path / "nested" / "vault.db"
+    first = run(target, "init", capsys=capsys)
+    assert (first["created"], first["knowledge"]) == (True, 0)
+    assert first["schema_version"] == 4
+    again = run(target, "init", capsys=capsys)
+    assert again["created"] is False
+    # Default location follows KASANE_DATA_ROOT when --vault is omitted.
+    monkeypatch.delenv("KASANE_VAULT_PATH", raising=False)
+    monkeypatch.setenv("KASANE_DATA_ROOT", str(tmp_path / "root"))
+    assert admin_main(["--json", "init"]) == 0
+    created = json.loads(capsys.readouterr().out)
+    assert created["vault"] == str(tmp_path / "root" / "vault.db")
+    assert (tmp_path / "root" / "vault.db").is_file()
+
+
+def test_admin_commands_use_the_init_default_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.delenv("KASANE_VAULT_PATH", raising=False)
+    monkeypatch.setenv("KASANE_DATA_ROOT", str(tmp_path / "root"))
+    with pytest.raises(SystemExit) as missing:
+        admin_main(["status"])
+    assert missing.value.code == 2
+    assert "kasane-admin init" in capsys.readouterr().err
+    assert not (tmp_path / "root" / "vault.db").exists()  # never created implicitly
+    assert admin_main(["init"]) == 0
+    capsys.readouterr()
+    assert admin_main(["--json", "status"]) == 0
+    assert json.loads(capsys.readouterr().out)["frozen"] is False
+
+
+@pytest.mark.parametrize("kind", ["directory", "garbage"])
+def test_init_refuses_bad_paths_with_a_message(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], kind: str
+) -> None:
+    target = tmp_path / "target"
+    if kind == "directory":
+        target.mkdir()
+    else:
+        target.write_bytes(b"not a sqlite database at all" * 10)
+    with pytest.raises(SystemExit) as raised:
+        admin_main(["--vault", str(target), "init"])
+    assert raised.value.code == 1
+    err = capsys.readouterr().err
+    assert err.startswith("kasane-admin: ") and "Traceback" not in err
+
+
+def test_init_reports_migration_of_an_older_vault(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import kasane.vault.repository as repository_module
+    from kasane.vault import migrations
+
+    target = tmp_path / "old.db"
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(migrations, "MIGRATIONS", migrations.MIGRATIONS[:3])
+        patch.setattr(repository_module, "CURRENT_SCHEMA_VERSION", 3)
+        VaultRepository(target)
+    result = run(target, "init", capsys=capsys)
+    assert (result["created"], result["migrated_from"], result["schema_version"]) == (
+        False,
+        3,
+        4,
+    )
+
+
+def test_init_probe_handles_uri_special_characters(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    target = tmp_path / "we#ird?name%.db"
+    assert run(target, "init", capsys=capsys)["created"] is True
+    again = run(target, "init", capsys=capsys)
+    assert again["created"] is False and "migrated_from" not in again
+    assert sorted(
+        p.name for p in tmp_path.iterdir() if not p.name.endswith(("-wal", "-shm"))
+    ) == [target.name]
+
+
+def test_init_refuses_a_foreign_sqlite_database(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    foreign = tmp_path / "app.db"
+    connection = sqlite3.connect(foreign)
+    connection.execute("CREATE TABLE users (id INTEGER)")
+    connection.commit()
+    connection.close()
+    with pytest.raises(SystemExit) as raised:
+        admin_main(["--vault", str(foreign), "init"])
+    assert raised.value.code == 1
+    assert "not a KASANE Vault" in capsys.readouterr().err
+    tables = (
+        sqlite3.connect(foreign)
+        .execute("SELECT name FROM sqlite_master WHERE type = 'table'")
+        .fetchall()
+    )
+    assert tables == [("users",)]  # untouched
