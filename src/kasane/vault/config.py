@@ -5,7 +5,6 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-
 # Owner decision (#36): the state directory is named KASANE, matching the
 # project name, e.g. ~/.local/state/KASANE/vault.db.
 DATA_DIR_NAME = "KASANE"
