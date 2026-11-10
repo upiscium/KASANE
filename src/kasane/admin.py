@@ -11,7 +11,8 @@ import json
 import os
 import sqlite3
 import sys
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -153,6 +154,9 @@ def _init(parser: argparse.ArgumentParser, args: argparse.Namespace) -> dict[str
     if path.exists() and not path.is_file():
         parser.exit(1, f"kasane-admin: not a file: {path}\n")
     before = _schema_version_of(path) if path.is_file() else None
+    if before == 0 and _has_tables(path):
+        # An unversioned SQLite file with tables is someone else's database.
+        parser.exit(1, f"kasane-admin: not a KASANE Vault: {path}\n")
     repository = VaultRepository(path)  # creates, or migrates an existing Vault
     after = repository.current_schema_version()
     payload: dict[str, Any] = {
@@ -169,9 +173,25 @@ def _init(parser: argparse.ArgumentParser, args: argparse.Namespace) -> dict[str
 def _schema_version_of(path: Path) -> int:
     """Read the schema version without migrating (0 for an unversioned file)."""
 
-    connection = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
-    try:
+    with _read_only(path) as connection:
         return int(connection.execute("PRAGMA user_version").fetchone()[0])
+
+
+def _has_tables(path: Path) -> bool:
+    with _read_only(path) as connection:
+        row = connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' LIMIT 1"
+        ).fetchone()
+        return row is not None
+
+
+@contextmanager
+def _read_only(path: Path) -> Iterator[sqlite3.Connection]:
+    # as_uri() percent-encodes '#', '?' and '%', which a raw f"file:{path}"
+    # URI would treat as fragment/query and silently open another file.
+    connection = sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True)
+    try:
+        yield connection
     finally:
         connection.close()
 

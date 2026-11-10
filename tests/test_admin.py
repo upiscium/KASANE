@@ -464,3 +464,35 @@ def test_init_reports_migration_of_an_older_vault(
         3,
         4,
     )
+
+
+def test_init_probe_handles_uri_special_characters(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    target = tmp_path / "we#ird?name%.db"
+    assert run(target, "init", capsys=capsys)["created"] is True
+    again = run(target, "init", capsys=capsys)
+    assert again["created"] is False and "migrated_from" not in again
+    assert sorted(
+        p.name for p in tmp_path.iterdir() if not p.name.endswith(("-wal", "-shm"))
+    ) == [target.name]
+
+
+def test_init_refuses_a_foreign_sqlite_database(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    foreign = tmp_path / "app.db"
+    connection = sqlite3.connect(foreign)
+    connection.execute("CREATE TABLE users (id INTEGER)")
+    connection.commit()
+    connection.close()
+    with pytest.raises(SystemExit) as raised:
+        admin_main(["--vault", str(foreign), "init"])
+    assert raised.value.code == 1
+    assert "not a KASANE Vault" in capsys.readouterr().err
+    tables = (
+        sqlite3.connect(foreign)
+        .execute("SELECT name FROM sqlite_master WHERE type = 'table'")
+        .fetchall()
+    )
+    assert tables == [("users",)]  # untouched

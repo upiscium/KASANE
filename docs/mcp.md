@@ -105,7 +105,8 @@ next to the Vault). `seed-fixture` defaults to the in-repo fixture; pass
    ```
 
    `kasane-admin` commands use the same default, so no variable is needed for
-   them. Re-running `init` on an older Vault migrates it in place and reports
+   them. Put the exact `vault:` path that `init` prints into the client configs
+   below, so clients and `kasane-admin` always use the same Vault. Re-running `init` on an older Vault migrates it in place and reports
    `migrated_from`; copy the file first if you want a backup.
 
 2. **Register the server** with your agent client. Set `KASANE_ACTOR` to a
