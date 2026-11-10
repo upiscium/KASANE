@@ -672,5 +672,12 @@ def test_default_runtime_path_uses_configured_or_xdg_state() -> None:
         "/srv/kasane/vault.db"
     )
     assert default_database_path({"XDG_STATE_HOME": "/state"}) == Path(
-        "/state/kasane/vault.db"
+        "/state/KASANE/vault.db"
     )
+
+
+def test_default_runtime_path_falls_back_to_home_state_kasane(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    assert default_database_path({}) == tmp_path / ".local/state/KASANE/vault.db"

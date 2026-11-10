@@ -54,7 +54,7 @@ Identity is server configuration, never tool input:
 | `--write-scope` | `KASANE_WRITE_SCOPES` (comma-separated) | Allowed namespaces, e.g. `project/kasane`; omitted = all |
 
 ```sh
-uv run kasane-mcp serve --vault ~/.local/state/kasane/vault.db \
+uv run kasane-mcp serve --vault ~/.local/state/KASANE/vault.db \
   --allow-write --actor opencode --model <model-id> --write-scope project/kasane
 ```
 
@@ -100,8 +100,8 @@ next to the Vault). `seed-fixture` defaults to the in-repo fixture; pass
 
    ```sh
    uv run --directory /path/to/KASANE kasane-admin init
-   # -> vault: $KASANE_DATA_ROOT/vault.db, else $XDG_STATE_HOME/kasane/vault.db,
-   #    else ~/.local/state/kasane/vault.db
+   # -> vault: $KASANE_DATA_ROOT/vault.db, else $XDG_STATE_HOME/KASANE/vault.db,
+   #    else ~/.local/state/KASANE/vault.db
    ```
 
    `kasane-admin` commands use the same default, so no variable is needed for
@@ -129,7 +129,7 @@ next to the Vault). `seed-fixture` defaults to the in-repo fixture; pass
              "--default-scope", "global", "--default-scope", "project/<project>"
            ],
            "environment": {
-             "KASANE_VAULT_PATH": "/home/<you>/.local/state/kasane/vault.db",
+             "KASANE_VAULT_PATH": "/home/<you>/.local/state/KASANE/vault.db",
              "KASANE_ACTOR": "opencode",
              "KASANE_MODEL": "<model-id>"
            }
@@ -151,7 +151,7 @@ next to the Vault). `seed-fixture` defaults to the in-repo fixture; pass
               "--allow-write", "--default-scope", "global",
               "--default-scope", "project/<project>"],
      "env": {
-       "KASANE_VAULT_PATH": "/home/<you>/.local/state/kasane/vault.db",
+       "KASANE_VAULT_PATH": "/home/<you>/.local/state/KASANE/vault.db",
        "KASANE_ACTOR": "claude-code",
        "KASANE_MODEL": "<model-id>"
      }

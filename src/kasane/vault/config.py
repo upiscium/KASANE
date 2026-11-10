@@ -5,6 +5,10 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+# Owner decision (#36): the state directory is named KASANE, matching the
+# project name, e.g. ~/.local/state/KASANE/vault.db.
+DATA_DIR_NAME = "KASANE"
+
 
 def default_data_root(environment: dict[str, str] | None = None) -> Path:
     """Resolve a state root outside the repository by configuration/XDG convention."""
@@ -13,8 +17,8 @@ def default_data_root(environment: dict[str, str] | None = None) -> Path:
     if configured := env.get("KASANE_DATA_ROOT"):
         return Path(configured).expanduser()
     if xdg_state := env.get("XDG_STATE_HOME"):
-        return Path(xdg_state).expanduser() / "kasane"
-    return Path.home() / ".local" / "state" / "kasane"
+        return Path(xdg_state).expanduser() / DATA_DIR_NAME
+    return Path.home() / ".local" / "state" / DATA_DIR_NAME
 
 
 def default_database_path(environment: dict[str, str] | None = None) -> Path:
