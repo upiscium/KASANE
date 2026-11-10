@@ -413,3 +413,54 @@ def test_init_creates_an_empty_vault_and_is_safe_to_rerun(
     created = json.loads(capsys.readouterr().out)
     assert created["vault"] == str(tmp_path / "root" / "vault.db")
     assert (tmp_path / "root" / "vault.db").is_file()
+
+
+def test_admin_commands_use_the_init_default_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.delenv("KASANE_VAULT_PATH", raising=False)
+    monkeypatch.setenv("KASANE_DATA_ROOT", str(tmp_path / "root"))
+    with pytest.raises(SystemExit) as missing:
+        admin_main(["status"])
+    assert missing.value.code == 2
+    assert "kasane-admin init" in capsys.readouterr().err
+    assert not (tmp_path / "root" / "vault.db").exists()  # never created implicitly
+    assert admin_main(["init"]) == 0
+    capsys.readouterr()
+    assert admin_main(["--json", "status"]) == 0
+    assert json.loads(capsys.readouterr().out)["frozen"] is False
+
+
+@pytest.mark.parametrize("kind", ["directory", "garbage"])
+def test_init_refuses_bad_paths_with_a_message(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], kind: str
+) -> None:
+    target = tmp_path / "target"
+    if kind == "directory":
+        target.mkdir()
+    else:
+        target.write_bytes(b"not a sqlite database at all" * 10)
+    with pytest.raises(SystemExit) as raised:
+        admin_main(["--vault", str(target), "init"])
+    assert raised.value.code == 1
+    err = capsys.readouterr().err
+    assert err.startswith("kasane-admin: ") and "Traceback" not in err
+
+
+def test_init_reports_migration_of_an_older_vault(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import kasane.vault.repository as repository_module
+    from kasane.vault import migrations
+
+    target = tmp_path / "old.db"
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(migrations, "MIGRATIONS", migrations.MIGRATIONS[:3])
+        patch.setattr(repository_module, "CURRENT_SCHEMA_VERSION", 3)
+        VaultRepository(target)
+    result = run(target, "init", capsys=capsys)
+    assert (result["created"], result["migrated_from"], result["schema_version"]) == (
+        False,
+        3,
+        4,
+    )

@@ -100,8 +100,13 @@ next to the Vault). `seed-fixture` defaults to the in-repo fixture; pass
 
    ```sh
    uv run --directory /path/to/KASANE kasane-admin init
-   # -> vault: ~/.local/state/kasane/vault.db (or $KASANE_DATA_ROOT/vault.db)
+   # -> vault: $KASANE_DATA_ROOT/vault.db, else $XDG_STATE_HOME/kasane/vault.db,
+   #    else ~/.local/state/kasane/vault.db
    ```
+
+   `kasane-admin` commands use the same default, so no variable is needed for
+   them. Re-running `init` on an older Vault migrates it in place and reports
+   `migrated_from`; copy the file first if you want a backup.
 
 2. **Register the server** with your agent client. Set `KASANE_ACTOR` to a
    stable name per client and `KASANE_MODEL` to the model it runs; leave
@@ -161,9 +166,10 @@ next to the Vault). `seed-fixture` defaults to the in-repo fixture; pass
 
    ```markdown
    ## KASANE knowledge
-   - Before designing or debugging, call `kasane_retrieve` with the task as the
-     query (budget e.g. 2000 tokens / 8000 bytes / 5 items). Treat T0–T2 items
-     as hints to check, T3 as approved.
+   - Before designing or debugging, call `kasane_retrieve` with
+     `{"schema_version": "0.1", "mode": "fast", "query": "<the task>",
+     "budget": {"max_tokens": 2000, "max_bytes": 8000, "max_evidence_items": 5}}`.
+     Treat T0–T2 items as hints to check, T3 as approved.
    - After applying a retrieved item, call `kasane_report_outcome` with
      success or failure and one line on the task. Report failures too.
    - When you establish a reusable procedure, design rule, situational fix,
@@ -174,9 +180,11 @@ next to the Vault). `seed-fixture` defaults to the in-repo fixture; pass
    - Never store secrets, credentials, or personal data.
    ```
 
-4. **Watch it** with `kasane-admin` (same `KASANE_VAULT_PATH`):
+4. **Watch it** with `kasane-admin` (uses the same default Vault as `init`;
+   pass `--vault` if your clients point elsewhere):
 
    ```sh
+   alias kasane-admin='uv run --directory /path/to/KASANE kasane-admin'
    kasane-admin status          # counts, gates, queue size
    kasane-admin events --limit 50
    kasane-admin queue           # T2 items waiting for your approve/reject

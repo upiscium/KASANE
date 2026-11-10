@@ -33,14 +33,15 @@ EXCERPT_CHARS = 160
 def main(argv: Sequence[str] | None = None) -> int:
     parser = _parser()
     args = parser.parse_args(argv)
-    if args.command == "init":
-        return _init(args)
-    service = TrustService(
-        VaultRepository(_require_vault(parser, args.vault)), TrustPolicyConfig()
-    )
     try:
-        payload = _dispatch(service, args)
-    except (TrustRejectedError, VaultError, ValueError, sqlite3.Error) as exc:
+        if args.command == "init":
+            payload = _init(parser, args)
+        else:
+            service = TrustService(
+                VaultRepository(_require_vault(parser, args.vault)), TrustPolicyConfig()
+            )
+            payload = _dispatch(service, args)
+    except (TrustRejectedError, VaultError, ValueError, sqlite3.Error, OSError) as exc:
         # Operator input errors and refusals: a message, never a traceback.
         parser.exit(1, f"kasane-admin: {exc}\n")
     _emit(payload, as_json=args.json)
@@ -147,20 +148,38 @@ def _dispatch(service: TrustService, args: argparse.Namespace) -> Any:
     raise AssertionError(command)  # pragma: no cover - argparse restricts choices
 
 
-def _init(args: argparse.Namespace) -> int:
-    from kasane.vault.config import default_database_path
-
-    path = Path(args.vault).expanduser() if args.vault else default_database_path()
-    existed = path.is_file()
+def _init(parser: argparse.ArgumentParser, args: argparse.Namespace) -> dict[str, Any]:
+    path = _vault_path(args.vault)
+    if path.exists() and not path.is_file():
+        parser.exit(1, f"kasane-admin: not a file: {path}\n")
+    before = _schema_version_of(path) if path.is_file() else None
     repository = VaultRepository(path)  # creates, or migrates an existing Vault
-    payload = {
+    after = repository.current_schema_version()
+    payload: dict[str, Any] = {
         "vault": str(repository.database_path),
-        "created": not existed,
-        "schema_version": repository.current_schema_version(),
+        "created": before is None,
+        "schema_version": after,
         "knowledge": len(repository.list_knowledge()),
     }
-    _emit(payload, as_json=args.json)
-    return 0
+    if before is not None and before != after:
+        payload["migrated_from"] = before
+    return payload
+
+
+def _schema_version_of(path: Path) -> int:
+    """Read the schema version without migrating (0 for an unversioned file)."""
+
+    connection = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+    try:
+        return int(connection.execute("PRAGMA user_version").fetchone()[0])
+    finally:
+        connection.close()
+
+
+def _vault_path(value: str | None) -> Path:
+    from kasane.vault.config import default_database_path
+
+    return Path(value).expanduser() if value else default_database_path()
 
 
 def _status(service: TrustService) -> dict[str, Any]:
@@ -243,11 +262,14 @@ def _line(item: dict[str, Any]) -> str:
 
 
 def _require_vault(parser: argparse.ArgumentParser, value: str | None) -> Path:
-    if not value:
-        parser.exit(2, f"kasane-admin: set --vault or {VAULT_ENV}\n")
-    path = Path(value).expanduser()
+    # Same default as `init`, so `init` then `status` works with no settings.
+    path = _vault_path(value)
     if not path.is_file():
-        parser.exit(2, f"kasane-admin: Vault DB not found: {path}\n")
+        parser.exit(
+            2,
+            f"kasane-admin: Vault DB not found: {path} "
+            f"(run `kasane-admin init`, or set --vault / {VAULT_ENV})\n",
+        )
     return path
 
 
