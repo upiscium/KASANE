@@ -1,7 +1,8 @@
 """``kasane-admin``: the operator's tools (approval queue, audit, emergency stop).
 
-Humans act here only at the top tier (approve/reject T2 items) and in
-emergencies (freeze, block, quarantine). See docs/trust.md and Issue #40.
+Humans act here only at the top tier (approve/reject T2 items), in
+emergencies (freeze, block, quarantine) and for maintenance (move). See
+docs/trust.md and Issue #40.
 """
 
 from __future__ import annotations
@@ -101,6 +102,16 @@ def _parser() -> argparse.ArgumentParser:
     quarantine.add_argument("--ref", action="append", default=[], dest="refs")
     quarantine.add_argument("--reason", required=True)
     quarantine.add_argument("--yes", action="store_true", help="apply the plan")
+
+    move = sub.add_parser(
+        "move",
+        help="relocate live knowledge to another ref with its history "
+        "(dry run unless --yes)",
+    )
+    move.add_argument("source", metavar="from-ref")
+    move.add_argument("target", metavar="to-ref")
+    move.add_argument("--reason", required=True)
+    move.add_argument("--yes", action="store_true", help="apply the move")
     return parser
 
 
@@ -146,6 +157,10 @@ def _dispatch(service: TrustService, args: argparse.Namespace) -> Any:
             "failed": plan.failed,
             "vouched_for_review": plan.vouched,
         }
+    if command == "move":
+        return service.move(
+            args.source, args.target, reason=args.reason, apply=args.yes
+        ).summary()
     raise AssertionError(command)  # pragma: no cover - argparse restricts choices
 
 

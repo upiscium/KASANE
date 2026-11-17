@@ -23,3 +23,7 @@ class StaleRevisionError(VaultError):
 
 class InvalidLifecycleTransitionError(VaultError):
     """The requested lifecycle transition is not allowed by v0.1 policy."""
+
+
+class KnowledgeExistsError(VaultError):
+    """A knowledge record already exists for the public identity."""

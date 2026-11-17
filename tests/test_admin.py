@@ -403,7 +403,7 @@ def test_init_creates_an_empty_vault_and_is_safe_to_rerun(
     target = tmp_path / "nested" / "vault.db"
     first = run(target, "init", capsys=capsys)
     assert (first["created"], first["knowledge"]) == (True, 0)
-    assert first["schema_version"] == 4
+    assert first["schema_version"] == 5
     again = run(target, "init", capsys=capsys)
     assert again["created"] is False
     # Default location follows KASANE_DATA_ROOT when --vault is omitted.
@@ -462,7 +462,7 @@ def test_init_reports_migration_of_an_older_vault(
     assert (result["created"], result["migrated_from"], result["schema_version"]) == (
         False,
         3,
-        4,
+        5,
     )
 
 
