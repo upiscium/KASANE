@@ -73,7 +73,9 @@ Omitting it allows writes to every namespace, including `private/*`.
 
 **Discovery:** verified knowledge (T1/T2) is returned by default, so agents can
 report outcomes on it. Candidates (T0) appear only with `min_trust: "T0"`; their
-main route to corroboration is the near-duplicate refusal of `kasane_propose`.
+routes to `verified` are an independent `kasane_verify` and corroboration (often
+via the near-duplicate refusal of `kasane_propose`). Outcome reports on a
+candidate count only as failures.
 
 ## Running
 
@@ -113,31 +115,32 @@ next to the Vault). `seed-fixture` defaults to the in-repo fixture; pass
    stable name per client and `KASANE_MODEL` to the model it runs; leave
    `KASANE_SESSION` unset so each client process is its own session.
 
-   OpenCode (`opencode.json`; shape from the
-   [OpenCode MCP docs](https://opencode.ai/docs/mcp-servers), which use
-   `mcp.servers`, `environment` and `disabled`; check against your version):
+   OpenCode (`opencode.json`; verified with OpenCode 1.18.35, where servers sit
+   directly under `mcp` and `{env:HOME}` is expanded):
 
    ```json
    {
      "mcp": {
-       "servers": {
-         "kasane": {
-           "type": "local",
-           "command": [
-             "uv", "run", "--directory", "/path/to/KASANE", "kasane-mcp", "serve",
-             "--allow-write",
-             "--default-scope", "global", "--default-scope", "project/<project>"
-           ],
-           "environment": {
-             "KASANE_VAULT_PATH": "/home/<you>/.local/state/KASANE/vault.db",
-             "KASANE_ACTOR": "opencode",
-             "KASANE_MODEL": "<model-id>"
-           }
-         }
+       "kasane": {
+         "type": "local",
+         "command": [
+           "uv", "run", "--directory", "{env:HOME}/src/KASANE",
+           "kasane-mcp", "serve", "--allow-write", "--default-scope", "global"
+         ],
+         "environment": {
+           "KASANE_VAULT_PATH": "{env:HOME}/.local/state/KASANE/vault.db",
+           "KASANE_ACTOR": "opencode",
+           "KASANE_MODEL": "<model-id>"
+         },
+         "enabled": true
        }
      }
    }
    ```
+
+   One OpenCode process shares the server across all its agents, so
+   `KASANE_MODEL` cannot follow per-agent models; name the models the agents
+   use.
 
    Claude Code: use `add-json`. The `claude mcp add -e KEY=VAL name -- cmd`
    form shown by `--help` mis-parses `-e` in some versions
@@ -148,8 +151,7 @@ next to the Vault). `seed-fixture` defaults to the in-repo fixture; pass
      "type": "stdio",
      "command": "uv",
      "args": ["run", "--directory", "/path/to/KASANE", "kasane-mcp", "serve",
-              "--allow-write", "--default-scope", "global",
-              "--default-scope", "project/<project>"],
+              "--allow-write", "--default-scope", "global"],
      "env": {
        "KASANE_VAULT_PATH": "/home/<you>/.local/state/KASANE/vault.db",
        "KASANE_ACTOR": "claude-code",
@@ -162,24 +164,48 @@ next to the Vault). `seed-fixture` defaults to the in-repo fixture; pass
    independent writers it needs; one client alone can still reach T1/T2 via
    separate sessions, which is the documented weak-independence risk.
 
+   Keep the server's default scope at `global` and let each request name its
+   project (step 3). A project in the server's default scope is served to
+   every repository the client works in.
+
 3. **Tell the agent how to use it.** Agents rarely call new tools unprompted.
-   Add to the project's `AGENTS.md` / `CLAUDE.md`:
+   Put this in the client's global instructions (`~/.claude/CLAUDE.md`,
+   `~/.config/opencode/AGENTS.md`), so it applies to every repository:
 
    ```markdown
    ## KASANE knowledge
+   - `<project>` below is the current repository's name in lowercase, without a
+     `PROJECT-` prefix (PROJECT-SUZKA → `suzka`, KUMIKI → `kumiki`). Outside a
+     repository, use only `global`.
    - Before designing or debugging, call `kasane_retrieve` with
      `{"schema_version": "0.1", "mode": "fast", "query": "<the task>",
+     "min_trust": "T0", "scope": ["global", "project/<project>"],
      "budget": {"max_tokens": 2000, "max_bytes": 8000, "max_evidence_items": 5}}`.
-     Treat T0–T2 items as hints to check, T3 as approved.
-   - After applying a retrieved item, call `kasane_report_outcome` with
-     success or failure and one line on the task. Report failures too.
+     Treat T0–T2 items as hints to check, T3 as approved. Ignore items that do
+     not concern the task.
+   - After applying a retrieved item, record whether it held, with one line on
+     the task. Report failures too.
+     - T0 item: call `kasane_verify` with `passed` or `failed`. If it is refused
+       as self-verification (you wrote it), skip it.
+     - T1 or higher: call `kasane_report_outcome` with `success` or `failure`.
    - When you establish a reusable procedure, design rule, situational fix,
      pitfall, or constraint, call `kasane_propose` with
-     `vault://project/<project>/<kind>/<slug>`, at least one source, and the
+     `vault://project/<project>/<kind>/<slug>` if it only holds for this
+     project, or `vault://global/<kind>/<slug>` if it holds for any project
+     (general tools, OS, libraries, methods). Give at least one source and the
      situation it applies to in the body. If it is refused as
      `near_duplicate`, corroborate the match only if you derived it yourself.
    - Never store secrets, credentials, or personal data.
    ```
+
+   Why each part matters (found in the first real-client test, #36):
+
+   - Without `min_trust: "T0"`, a new Vault holds only candidates and every
+     retrieval returns `insufficient_evidence`.
+   - A namespace fixed in the instructions files every repository's knowledge
+     under one project (`kasane-admin move` fixes such records).
+   - Success outcomes on candidates do not count toward promotion, so agents
+     that only report outcomes never promote T0 knowledge; a verification does.
 
 4. **Watch it** with `kasane-admin` (uses the same default Vault as `init`;
    pass `--vault` if your clients point elsewhere):
