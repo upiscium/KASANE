@@ -13,6 +13,7 @@ from uuid import uuid4
 from .config import default_database_path
 from .errors import (
     InvalidLifecycleTransitionError,
+    KnowledgeExistsError,
     KnowledgeNotFoundError,
     StaleRevisionError,
 )
@@ -423,18 +424,141 @@ class VaultRepository:
         timestamp = self._clock()
         details_json = canonical_json(require_json(details or {}))
         with self._transaction() as connection:
-            cursor = connection.execute(
-                """
-                INSERT INTO operator_actions(
-                    action, target, reason, details_json, actor, timestamp
-                ) VALUES (?, ?, ?, ?, ?, ?)
-                """,
-                (action, target, reason, details_json, actor, timestamp),
+            sequence = self._insert_operator_action(
+                connection, action, target, reason, details_json, actor, timestamp
             )
-            sequence = int(cursor.lastrowid or 0)
         return OperatorAction(
             sequence, action, target, reason, parse_json(details_json), actor, timestamp
         )
+
+    def move_knowledge(
+        self,
+        source_ref: str,
+        target_ref: str,
+        *,
+        expected_revision: int,
+        expected_last_event_id: str | None,
+        actor: str,
+        reason: str,
+    ) -> tuple[KnowledgeRecord, int]:
+        """Relocate a live record to another identity, keeping its history.
+
+        Events are append-only and keyed by ref, so a record cannot be renamed
+        in place. The record and every event are copied to ``target_ref``;
+        copies keep actor, timestamp, revision, type and metadata (plus
+        ``moved_from``), so the trust assessment of the target is unchanged.
+        The source is archived (canonical via deprecated) and one MOVE
+        operator action is logged, all in one transaction. Returns the moved
+        record and the number of events copied.
+        """
+
+        source = parse_knowledge_ref(source_ref)
+        target = parse_knowledge_ref(target_ref)
+        if source.knowledge_ref == target.knowledge_ref:
+            raise ValueError("source and target are the same knowledge_ref")
+        if not reason.strip():
+            raise ValueError("move requires a reason")
+        timestamp = self._clock()
+        with self._transaction() as connection:
+            current = self._require_current(connection, source_ref, expected_revision)
+            self._require_last_event(connection, source_ref, expected_last_event_id)
+            status = KnowledgeStatus(current["status"])
+            if status in (KnowledgeStatus.DEPRECATED, KnowledgeStatus.ARCHIVED):
+                raise InvalidLifecycleTransitionError(
+                    f"cannot move a {status.value} record"
+                )
+            occupied = connection.execute(
+                """
+                SELECT 1 FROM knowledge_records
+                WHERE knowledge_ref = ? OR (namespace = ? AND knowledge_path = ?)
+                """,
+                (target.knowledge_ref, target.namespace, target.knowledge_path),
+            ).fetchone()
+            if occupied is not None:
+                raise KnowledgeExistsError(f"{target_ref} already exists")
+            connection.execute(
+                f"""
+                INSERT INTO knowledge_records({_RECORD_COLUMNS})
+                SELECT ?, ?, ?, knowledge_type, title, body, status, stability,
+                       tags_json, scope_json, applies_when_json,
+                       counterconditions_json, sources_json, provenance_json,
+                       generated_json, verification_json, verification_outcome,
+                       stale_after, created_at, ?, revision
+                FROM knowledge_records WHERE knowledge_ref = ?
+                """,
+                (
+                    target.knowledge_ref,
+                    target.namespace,
+                    target.knowledge_path,
+                    timestamp,
+                    source_ref,
+                ),
+            )
+            history = connection.execute(
+                """
+                SELECT event_id, revision, actor, timestamp, event_type, metadata_json
+                FROM knowledge_events
+                WHERE knowledge_ref = ?
+                ORDER BY event_sequence
+                """,
+                (source_ref,),
+            ).fetchall()
+            for row in history:
+                self._append_event(
+                    connection,
+                    knowledge_ref=target_ref,
+                    revision=row["revision"],
+                    actor=row["actor"],
+                    event_type=EventType(row["event_type"]),
+                    metadata=_moved_metadata(
+                        parse_json(row["metadata_json"]), source_ref, row["event_id"]
+                    ),
+                    timestamp=row["timestamp"],
+                )
+            retire_metadata: dict[str, JsonValue] = {
+                "decision": "move",
+                "moved_to": target_ref,
+                "reason": reason,
+            }
+            revision = expected_revision
+            steps = (
+                [KnowledgeStatus.DEPRECATED, KnowledgeStatus.ARCHIVED]
+                if status is KnowledgeStatus.CANONICAL
+                else [KnowledgeStatus.ARCHIVED]
+            )
+            for step in steps:
+                event_type = self._transition_event(status, step)
+                connection.execute(
+                    """
+                    UPDATE knowledge_records
+                    SET status = ?, updated_at = ?, revision = ?
+                    WHERE knowledge_ref = ?
+                    """,
+                    (step.value, timestamp, revision + 1, source_ref),
+                )
+                revision += 1
+                self._append_event(
+                    connection,
+                    knowledge_ref=source_ref,
+                    revision=revision,
+                    actor=actor,
+                    event_type=event_type,
+                    metadata=retire_metadata,
+                    timestamp=timestamp,
+                )
+                status = step
+            self._insert_operator_action(
+                connection,
+                "MOVE",
+                source_ref,
+                reason,
+                canonical_json(
+                    {"from": source_ref, "to": target_ref, "events": len(history)}
+                ),
+                actor,
+                timestamp,
+            )
+        return self.get_knowledge(target_ref), len(history)
 
     def list_operator_actions(self) -> list[OperatorAction]:
         with self._connection() as connection:
@@ -632,6 +756,26 @@ class VaultRepository:
             ),
         )
 
+    @staticmethod
+    def _insert_operator_action(
+        connection: sqlite3.Connection,
+        action: str,
+        target: str | None,
+        reason: str,
+        details_json: str,
+        actor: str,
+        timestamp: str,
+    ) -> int:
+        cursor = connection.execute(
+            """
+            INSERT INTO operator_actions(
+                action, target, reason, details_json, actor, timestamp
+            ) VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (action, target, reason, details_json, actor, timestamp),
+        )
+        return int(cursor.lastrowid or 0)
+
     def _draft_values(self, draft: KnowledgeDraft) -> tuple[Any, ...]:
         if not draft.knowledge_type.strip() or not draft.title.strip():
             raise ValueError("knowledge_type and title must be non-empty")
@@ -718,6 +862,25 @@ class VaultRepository:
             updated_at=row["updated_at"],
             revision=row["revision"],
         )
+
+
+def _moved_metadata(
+    metadata: JsonValue, source_ref: str, event_id: str
+) -> dict[str, JsonValue]:
+    """Event metadata for a moved copy: the original plus where it came from.
+
+    The original keys (notably the ``agent`` block) stay at the top level so
+    trust evaluation reads the copy exactly like the original event.
+    ``moved_from`` lists every hop, oldest first, so repeated moves keep the
+    link to the first event.
+    """
+
+    origin: dict[str, JsonValue] = {"knowledge_ref": source_ref, "event_id": event_id}
+    if not isinstance(metadata, dict):
+        return {"original_metadata": metadata, "moved_from": [origin]}
+    earlier = metadata.get("moved_from")
+    hops = list(earlier) if isinstance(earlier, list) else []
+    return {**metadata, "moved_from": [*hops, origin]}
 
 
 def _at_or_after(timestamp: str, cutoff: datetime) -> bool:

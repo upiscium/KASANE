@@ -5,7 +5,7 @@ from __future__ import annotations
 import sqlite3
 from dataclasses import dataclass
 
-CURRENT_SCHEMA_VERSION = 4
+CURRENT_SCHEMA_VERSION = 5
 
 
 @dataclass(frozen=True)
@@ -248,6 +248,52 @@ MIGRATIONS = (
                 timestamp TEXT NOT NULL
             )
             """,
+            """
+            CREATE TRIGGER operator_actions_no_update
+            BEFORE UPDATE ON operator_actions
+            BEGIN
+                SELECT RAISE(ABORT, 'operator_actions is append-only');
+            END
+            """,
+            """
+            CREATE TRIGGER operator_actions_no_delete
+            BEFORE DELETE ON operator_actions
+            BEGIN
+                SELECT RAISE(ABORT, 'operator_actions is append-only');
+            END
+            """,
+        ),
+    ),
+    Migration(
+        version=5,
+        name="operator_move_action",
+        statements=(
+            "DROP TRIGGER operator_actions_no_update",
+            "DROP TRIGGER operator_actions_no_delete",
+            "ALTER TABLE operator_actions RENAME TO operator_actions_v4",
+            """
+            CREATE TABLE operator_actions (
+                sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+                action TEXT NOT NULL CHECK (
+                    action IN ('FREEZE','UNFREEZE','BLOCK_ACTOR','UNBLOCK_ACTOR',
+                               'QUARANTINE','MOVE')
+                ),
+                target TEXT,
+                reason TEXT NOT NULL CHECK (length(trim(reason)) > 0),
+                details_json TEXT NOT NULL,
+                actor TEXT NOT NULL,
+                timestamp TEXT NOT NULL
+            )
+            """,
+            """
+            INSERT INTO operator_actions(
+                sequence, action, target, reason, details_json, actor, timestamp
+            )
+            SELECT sequence, action, target, reason, details_json, actor, timestamp
+            FROM operator_actions_v4
+            ORDER BY sequence
+            """,
+            "DROP TABLE operator_actions_v4",
             """
             CREATE TRIGGER operator_actions_no_update
             BEFORE UPDATE ON operator_actions

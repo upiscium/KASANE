@@ -70,8 +70,8 @@ is never disclosed, a writer scoped to `project/a` can create a near-duplicate o
 
 ## Operator tools (`kasane-admin`)
 
-Humans act only at the top tier and in emergencies. All commands take
-`--vault` (or `KASANE_VAULT_PATH`) and `--json`.
+Humans act only at the top tier, in emergencies, and for maintenance (`move`).
+All commands take `--vault` (or `KASANE_VAULT_PATH`) and `--json`.
 
 | Command | Effect |
 | --- | --- |
@@ -84,6 +84,7 @@ Humans act only at the top tier and in emergencies. All commands take
 | `freeze` / `unfreeze --reason` | Refuse / allow **all** agent writes |
 | `block` / `unblock WRITER --reason` | Refuse / allow one writer identity |
 | `quarantine (--actor W [--since T] \| --ref R…) --reason [--yes]` | Archive knowledge whose current content W authored (canonical goes via deprecated) and the given refs; lists live knowledge W vouched for, for review. Dry run unless `--yes` |
+| `move FROM TO --reason [--yes]` | Relocate live knowledge to another namespace or path with its history; FROM is archived (canonical goes via deprecated). Dry run unless `--yes` |
 
 Emergency procedure: `freeze` → `block` the writer → `quarantine --actor` (dry
 run, then `--yes`) → review the vouched list (corroborations, verifications or
@@ -93,11 +94,35 @@ not authenticated, so a writer that controls its own server configuration can
 return under another name: keep the Vault frozen until that configuration is
 fixed.
 
-Freeze, block and quarantine are recorded in an append-only `operator_actions`
-log (Vault schema v4). Gates are checked when a write starts, not inside its
-transaction, so a write already in flight when `freeze` lands may still commit.
-Operator actions (approve, reject, quarantine, reconcile) are allowed while
-frozen.
+Freeze, block, quarantine and move are recorded in an append-only
+`operator_actions` log (Vault schema v4; `MOVE` since v5). Gates are checked
+when a write starts, not inside its transaction, so a write already in flight
+when `freeze` lands may still commit.
+Operator actions (approve, reject, quarantine, reconcile, move) are allowed
+while frozen.
+
+Moving knowledge (Issue #49): events are append-only and keyed by ref, so a
+record cannot be renamed in place. `move` copies the record and every event to
+the new ref in one transaction. Each copy keeps its actor, timestamp, revision,
+type and agent metadata and adds `moved_from`, so the moved record has the same
+tier, author and independence as before: its author still cannot verify or
+count for it. The old ref is archived with `decision: move` and `moved_to`, and
+one `MOVE` action is logged. Use it to fix the namespace of knowledge stored
+under the wrong project, or to lift project knowledge that holds anywhere into
+`global`.
+
+Notes on `move`:
+
+- The old ref does not redirect. An agent still holding it gets a refusal
+  (archived) and has to retrieve again.
+- Copies keep their original timestamps but get new positions in the event
+  log, so `events` (newest first by log position) lists them as recent and they
+  can push older entries past `--limit`. Use `--since` or a larger `--limit`
+  when auditing a writer after a move.
+- `moved_from` lists every hop, oldest first.
+- The first `kasane-admin` run of this version migrates the Vault to schema
+  v5, and older KASANE code refuses a v5 Vault. Update the checkout that the
+  MCP clients run before using `move` on a shared Vault.
 
 ## What not to store
 

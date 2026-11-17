@@ -104,6 +104,26 @@ class QuarantinePlan:
 
 
 @dataclass(frozen=True)
+class MovePlan:
+    source: str
+    target: str
+    status: str
+    tier: str | None  # after the move when applied (same as before by design)
+    events: int  # history entries copied to the target
+    applied: bool
+
+    def summary(self) -> dict[str, JsonValue]:
+        return {
+            "applied": self.applied,
+            "from": self.source,
+            "to": self.target,
+            "status": self.status,
+            "tier": self.tier,
+            "events": self.events,
+        }
+
+
+@dataclass(frozen=True)
 class TrustResult:
     record: KnowledgeRecord
     assessment: TrustAssessment
@@ -477,6 +497,61 @@ class TrustService:
                 "failed": _json_list(failed),
                 "vouched": _json_list(vouched),
             },
+        )
+
+    # Operator maintenance ----------------------------------------------
+
+    def move(
+        self, source_ref: str, target_ref: str, *, reason: str, apply: bool = False
+    ) -> MovePlan:
+        with _refusing():
+            return self._move_unchecked(source_ref, target_ref, reason, apply)
+
+    def _move_unchecked(
+        self, source_ref: str, target_ref: str, reason: str, apply: bool
+    ) -> MovePlan:
+        """Relocate live knowledge to another namespace or path.
+
+        The history moves with it, so trust (tier, author, independence) is
+        unchanged; the old ref is archived. Dry run unless ``apply``.
+        """
+
+        if not reason.strip():
+            raise TrustRejectedError("move requires a reason")
+        parse_knowledge_ref(target_ref)
+        if source_ref == target_ref:
+            raise TrustRejectedError("source and target are the same knowledge_ref")
+        current = self.assess(source_ref)
+        status = current.record.status
+        if status in (KnowledgeStatus.DEPRECATED, KnowledgeStatus.ARCHIVED):
+            raise TrustRejectedError(
+                f"{source_ref} is {status.value}; only live knowledge can be moved"
+            )
+        try:
+            self.repository.get_knowledge(target_ref)
+        except KnowledgeNotFoundError:
+            pass
+        else:
+            raise TrustRejectedError(f"{target_ref} already exists")
+        events = len(self.repository.list_events(source_ref))
+        tier = current.assessment.summary()["tier"]
+        if apply:
+            _, events = self.repository.move_knowledge(
+                source_ref,
+                target_ref,
+                expected_revision=current.record.revision,
+                expected_last_event_id=current.last_event_id,
+                actor=OPERATOR_ACTOR,
+                reason=reason,
+            )
+            tier = self.assess(target_ref).assessment.summary()["tier"]
+        return MovePlan(
+            source=source_ref,
+            target=target_ref,
+            status=status.value,
+            tier=None if tier is None else str(tier),
+            events=events,
+            applied=apply,
         )
 
     # Internals ---------------------------------------------------------

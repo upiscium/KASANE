@@ -13,6 +13,7 @@ from .policy import (
 from .service import (
     AgentContext,
     DuplicateKnowledgeError,
+    MovePlan,
     QuarantinePlan,
     ReconcileResult,
     TrustRejectedError,
@@ -25,6 +26,7 @@ __all__ = [
     "POLICY_ACTOR",
     "AgentContext",
     "DuplicateKnowledgeError",
+    "MovePlan",
     "Participant",
     "PolicyAction",
     "QuarantinePlan",
